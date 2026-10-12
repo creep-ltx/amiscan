@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/creep-ltx/amiscan/internal/amiga"
+	"github.com/creep-ltx/amiscan/internal/bootdb"
 	"github.com/creep-ltx/amiscan/internal/diz"
 	"github.com/creep-ltx/amiscan/internal/update"
 	"github.com/creep-ltx/amiscan/internal/xfd"
@@ -105,6 +106,14 @@ func main() {
 	} else {
 		xfdNote = `xfdmaster.library not installed: packed programs are not unpacked ("amiscan -update" fetches it)`
 	}
+	// the Amiga Bootblock Reader database is optional too
+	var bdb *bootdb.DB
+	if _, err := os.Stat(filepath.Join(dir, bootdb.BrainFile)); err == nil {
+		if bdb, err = bootdb.Load(dir); err != nil {
+			fmt.Fprintln(os.Stderr, "amiscan: boot block database:", err)
+			os.Exit(exitTrouble)
+		}
+	}
 	switch {
 	case *showVersion:
 		fmt.Printf("AmiScan %s\n%s in %s\n", version, s.IDString, dir)
@@ -112,6 +121,11 @@ func main() {
 			fmt.Println(dec.IDString)
 		} else {
 			fmt.Println(xfdNote)
+		}
+		if bdb != nil {
+			fmt.Printf("Amiga Bootblock Reader database: %d boot blocks\n", bdb.Size())
+		} else {
+			fmt.Println(`boot block database not installed ("amiscan -update" fetches it)`)
 		}
 		return
 	case *list:
@@ -121,7 +135,7 @@ func main() {
 		usage()
 		os.Exit(exitTrouble)
 	}
-	r := &reporter{s: s, dec: dec, json: *jsonOut, verbose: *verbose, start: time.Now()}
+	r := &reporter{s: s, dec: dec, bdb: bdb, json: *jsonOut, verbose: *verbose, start: time.Now()}
 	if !r.json {
 		fmt.Printf("AmiScan %s with %s\n", version, s.IDString)
 		if xfdNote != "" {
@@ -157,9 +171,11 @@ func runUpdate(flagDir string, force bool) int {
 	u := &update.Updater{Dir: dir, Log: func(s string) { fmt.Println("  " + s) }}
 	update.XVS.Version = libraryVersion("xvs.library")
 	update.XFD.Version = libraryVersion("xfdmaster.library")
+	update.BootBrain.Version = bootDBVersion(false)
+	update.BootSearch.Version = bootDBVersion(true)
 	fmt.Printf("Updating %s\n", dir)
 	code := exitClean
-	for _, src := range []*update.Source{update.XVS, update.XFD} {
+	for _, src := range []*update.Source{update.XVS, update.XFD, update.BootBrain, update.BootSearch} {
 		results, err := u.Update(ctx, src, force)
 		for _, r := range results {
 			fmt.Println(r)
@@ -170,6 +186,25 @@ func runUpdate(flagDir string, force bool) int {
 		}
 	}
 	return code
+}
+
+// bootDBVersion loads the boot block database in dir and counts the brain
+// file's entries, or the search list's.
+func bootDBVersion(search bool) func(string) (string, error) {
+	return func(dir string) (string, error) {
+		db, err := bootdb.Load(dir)
+		if err != nil {
+			return "", err
+		}
+		brain, list := db.Counts()
+		if search {
+			if list == 0 {
+				return "", errors.New("the search list is empty or unreadable")
+			}
+			return fmt.Sprintf("%d byte patterns", list), nil
+		}
+		return fmt.Sprintf("%d boot blocks", brain), nil
+	}
 }
 
 // checkLibrary loads one library from dir in a fresh emulated Amiga and
@@ -296,11 +331,15 @@ type finding struct {
 	Virus  string `json:"virus,omitempty"`  // virus name
 	Type   string `json:"type,omitempty"`   // "boot virus", "link virus", ...; for clean items what it is
 	Detail string `json:"detail,omitempty"` // why skipped or the error
+	// FoundBy is "xvs" or "bootblock database" for a virus; for a boot
+	// block the database names, Type holds its name and class.
+	FoundBy string `json:"found_by,omitempty"`
 }
 
 type reporter struct {
 	s       *xvs.Scanner
 	dec     *xfd.Decruncher // nil without xfdmaster.library
+	bdb     *bootdb.DB      // nil without the boot block database
 	json    bool
 	verbose bool
 	start   time.Time
@@ -352,11 +391,20 @@ func (r *reporter) check(it diz.Item) error {
 	if it.Boot {
 		res, err := r.s.CheckBootblock(it.Data)
 		f := finding{Path: it.Path, Kind: "boot"}
+		var known *bootdb.Entry
+		if r.bdb != nil {
+			known = r.bdb.Match(it.Data)
+		}
 		switch {
 		case err != nil:
 			f.Result, f.Detail = "error", err.Error()
 		case res.Infected():
-			f.Result, f.Virus, f.Type = "virus", res.Name, "boot virus"
+			f.Result, f.Virus, f.Type, f.FoundBy = "virus", res.Name, "boot virus", "xvs"
+		case known != nil && known.IsVirus():
+			// xvs does not know it; the database does
+			f.Result, f.Virus, f.Type, f.FoundBy = "virus", known.Name, "boot virus", "bootblock database"
+		case known != nil:
+			f.Result, f.Type = "clean", known.Name+" ("+known.ClassName()+")"
 		default:
 			f.Result, f.Type = "clean", res.Name
 		}
@@ -443,14 +491,22 @@ func (r *reporter) report(f finding) {
 	}
 	switch f.Result {
 	case "virus":
-		fmt.Printf("%s: VIRUS %s (%s)\n", f.Path, f.Virus, f.Type)
+		by := ""
+		if f.FoundBy == "bootblock database" {
+			by = ", found by the boot block database"
+		}
+		fmt.Printf("%s: VIRUS %s (%s%s)\n", f.Path, f.Virus, f.Type, by)
 	case "error":
 		fmt.Printf("%s: ERROR %s\n", f.Path, f.Detail)
 	case "skipped":
 		fmt.Printf("%s: NOT CHECKED, %s\n", f.Path, f.Detail)
 	default:
 		if r.verbose {
-			fmt.Printf("%s: ok (%s)\n", f.Path, strings.ToLower(f.Type))
+			t := f.Type
+			if f.Kind != "boot" {
+				t = strings.ToLower(t)
+			}
+			fmt.Printf("%s: ok (%s)\n", f.Path, t)
 		}
 	}
 }

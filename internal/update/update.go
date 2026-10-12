@@ -28,7 +28,9 @@ import (
 // Source is one archive AmiScan keeps up to date.
 type Source struct {
 	Name string // shown to the user, e.g. "xvs.library"
-	URL  string // an LhA archive
+	URL  string // an LhA archive, or with Plain the file itself
+	// Plain: the download is the file itself, installed as the one name in Files.
+	Plain bool
 	// Files maps an archive member (path, any case) to its name in the libs folder.
 	Files map[string]string
 	// Dirs maps an archive folder (path, any case) to a folder in the libs
@@ -65,6 +67,25 @@ var XFD = &Source{
 	Dirs:  map[string]string{"xfd_User/Libs/xfd": "xfd"},
 }
 
+// The boot block database of Amiga Bootblock Reader (Jason and Jordan
+// Smith). Its repository has no licence, so it is never passed on: each
+// user fetches it from there.
+var (
+	BootBrain = &Source{
+		Name:  "boot block database",
+		URL:   "https://raw.githubusercontent.com/jasonthesmith79/AmigaBootBlockReader/HEAD/Resources/Brainfile.txt",
+		Plain: true,
+		Files: map[string]string{"Brainfile.txt": "abr-brainfile.xml"},
+	}
+	BootSearch = &Source{
+		Name:  "boot block search list",
+		URL:   "https://raw.githubusercontent.com/jasonthesmith79/AmigaBootBlockReader/HEAD/bin/Debug/net472/searchbrain.xml",
+		Plain: true,
+		Files: map[string]string{"searchbrain.xml": "abr-searchbrain.xml"},
+		Needs: []*Source{BootBrain},
+	}
+)
+
 // Result says what happened to one source.
 type Result struct {
 	Source  string
@@ -79,8 +100,10 @@ func (r Result) String() string {
 	switch {
 	case r.Action == "updated" && r.Old != "":
 		s += fmt.Sprintf(" from version %s to %s", r.Old, r.Version)
-	case r.Version != "":
+	case r.Version != "" && versionRe.MatchString(r.Version):
 		s += ", version " + r.Version
+	case r.Version != "":
+		s += ", " + r.Version
 	}
 	if r.Signed && r.Action != "up to date" {
 		s += ", signature checked"
@@ -230,14 +253,20 @@ func (u *Updater) one(ctx context.Context, src *Source, force bool) (Result, err
 	}
 	sum := sha256.Sum256(archive)
 	hexSum := hex.EncodeToString(sum[:])
-	if !force && hexSum == st.SHA256 && installed != "" {
+	if !force && hexSum == st.SHA256 && (installed != "" || src.Version == nil) {
 		st.ETag, st.LastModified, st.Checked = resp.Header.Get("ETag"), resp.Header.Get("Last-Modified"), time.Now()
 		res.Action, res.Version = "up to date", installed
 		return res, u.saveState(states)
 	}
 
-	files, signed, err := unpack(src, archive)
-	if err != nil {
+	var files map[string][]byte
+	var signed bool
+	if src.Plain {
+		files = map[string][]byte{}
+		for _, name := range src.Files {
+			files[name] = archive
+		}
+	} else if files, signed, err = unpack(src, archive); err != nil {
 		return res, err
 	}
 	res.Signed = signed
@@ -268,7 +297,7 @@ func (u *Updater) one(ctx context.Context, src *Source, force bool) (Result, err
 		if version, err = src.Version(tmp); err != nil {
 			return res, fmt.Errorf("the downloaded files do not work: %w", err)
 		}
-		if installed != "" && compareVersions(version, installed) < 0 {
+		if installed != "" && comparable(version, installed) && compareVersions(version, installed) < 0 {
 			return res, fmt.Errorf("the download (%s) is older than what is installed (%s); keeping %s", version, installed, installed)
 		}
 	}
@@ -293,8 +322,10 @@ func (u *Updater) one(ctx context.Context, src *Source, force bool) (Result, err
 			return res, err
 		}
 	}
-	os.MkdirAll(filepath.Join(u.Dir, "archives"), 0o755)
-	writeAtomic(filepath.Join(u.Dir, "archives", path.Base(req.URL.Path)), archive)
+	if !src.Plain {
+		os.MkdirAll(filepath.Join(u.Dir, "archives"), 0o755)
+		writeAtomic(filepath.Join(u.Dir, "archives", path.Base(req.URL.Path)), archive)
+	}
 
 	*st = sourceState{ETag: resp.Header.Get("ETag"), LastModified: resp.Header.Get("Last-Modified"),
 		SHA256: hexSum, Version: version, Checked: time.Now()}
@@ -302,7 +333,7 @@ func (u *Updater) one(ctx context.Context, src *Source, force bool) (Result, err
 	switch {
 	case installed == "":
 		res.Action = "installed"
-	case compareVersions(version, installed) == 0:
+	case version == installed || (comparable(version, installed) && compareVersions(version, installed) == 0):
 		res.Action = "up to date"
 	default:
 		res.Action = "updated"
@@ -373,6 +404,10 @@ func unpack(src *Source, archive []byte) (files map[string][]byte, signed bool, 
 }
 
 var versionRe = regexp.MustCompile(`(\d+)\.(\d+)`)
+
+// comparable reports whether both are "33.49"-style versions; a database
+// counted in entries can shrink on purpose and is not compared.
+func comparable(a, b string) bool { return versionRe.MatchString(a) && versionRe.MatchString(b) }
 
 // compareVersions compares "33.49"-style versions.
 func compareVersions(a, b string) int {

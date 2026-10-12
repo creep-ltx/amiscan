@@ -16,7 +16,12 @@ installed.
    - **xfdmaster.library** and its 103 decrunchers from Aminet
      (<https://aminet.net/util/pack/xfdmaster.lha>), so that programs packed
      with PowerPacker, Imploder, StoneCracker, CrunchMania and the like are
-     unpacked and their insides checked too.
+     unpacked and their insides checked too;
+   - the **boot block database** of Amiga Bootblock Reader (Jason and Jordan
+     Smith, <https://github.com/jasonthesmith79/AmigaBootBlockReader>): 3,040
+     boot blocks and 314 byte patterns, a second opinion on boot blocks
+     (it knows some boot viruses xvs.library does not) and names for the
+     harmless ones (intros, logos, utilities).
 
 Run `amiscan -update` now and then (AmiScan reminds you after 30 days). It
 only downloads when the Virus Help Team has published something new, and it
@@ -27,8 +32,10 @@ installs a new xvs.library only when:
 - it loads and passes its own self test,
 - it is not older than the one you have.
 
-The previous library is kept in `libs/old/`, the archive as published in
-`libs/archives/`. If a library ever needs a key file (xvs.library does not),
+Only the xvs.library download is signed; the others come over HTTPS from
+Aminet and GitHub, are tried before they replace anything, and their code
+only ever runs inside AmiScan's emulated Amiga. The previous files are kept
+in `libs/old/`, the archives as published in `libs/archives/`. If a library ever needs a key file (xvs.library does not),
 `-update` fetches that too when it is missing.
 
 You can also install xvs.library by hand: take `xvs/libs/xvs.library` out of
@@ -67,8 +74,9 @@ not be checked (named in the output).
 ## Thanks
 
 xvs.library is © Georg Wittmann, Alex van Niel and Jan Erik Olausen;
-xfdmaster.library © Georg Hörmann and Dirk Stöcker. Both are freeware, not
-part of AmiScan, and downloaded by you from where their authors publish them.
+xfdmaster.library © Georg Hörmann and Dirk Stöcker; the boot block database
+© Jason and Jordan Smith. None of them is part of AmiScan: each is downloaded
+by you from where its authors publish it.
 All Amiga code runs inside AmiScan's emulated Amiga, which can only read its
 own libs folder. The 68000 is
 Musashi by Karl Stenerud. See [NOTICES.md](NOTICES.md).

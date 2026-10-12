@@ -68,7 +68,7 @@ func Open(m *amiga.Machine) (*Decruncher, error) {
 	if base == 0 {
 		return nil, errors.New("xfdmaster.library: OpenLibrary failed")
 	}
-	return &Decruncher{m: m, base: base, IDString: m.Latin1String(m.Read32(base + amiga.Library_lib_IdString))}, nil
+	return &Decruncher{m: m, base: base, IDString: strings.TrimSpace(m.Latin1String(m.Read32(base + amiga.Library_lib_IdString)))}, nil
 }
 
 func (x *Decruncher) call(lvo uint32, regs map[string]uint32, budget int64) (uint32, error) {

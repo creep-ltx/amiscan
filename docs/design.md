@@ -12,7 +12,20 @@
   independent emulator). Tests: `AMISCAN_LIBS=... AMISCAN_SAMPLES=<unpacked
   collection> make test`. Download the collection again when needed; never commit
   samples.
-- `amiscan -update` (2026-10-12) installs and updates xvs.library, signature-checked.
+- `amiscan -update` (2026-10-12) installs and updates xvs.library (signature-checked),
+  xfdmaster.library + LIBS:xfd/ (Aminet) and the Amiga Bootblock Reader database
+  (GitHub raw: Resources/Brainfile.txt and bin/Debug/net472/searchbrain.xml, the
+  newest copies in that repo as of 2026-10-12).
+- xfd (2026-10-12): every checked file is offered to xfdmaster, up to 5 layers.
+  Collection: 124 unpacked, +72 viruses. Decrunched StoneCracker 4.04 is byte-identical
+  to the collector's unpacked original. CPU is now a 68020 (24-bit bus), AttnFlags
+  010|020; all earlier verdicts unchanged.
+- Boot block database (2026-10-12): `internal/bootdb` matches like ABR's
+  IdentifyBootblock: CRC-32 of the 1024 bytes (CRC field is a comma list of hex
+  without leading zeros), then searchbrain byte sequences (base64) anywhere, then
+  exactly 7 offset,value pairs. xvs decides first; a database "v" match makes a virus
+  only when xvs says not. Collection: +1 (Zevil, in UNKNOWN_TO_ANY.LHA); no false
+  alarm on 63 clean boot blocks from the user's disks.
 - Next: see "Later" below.
 
 ## How it works
@@ -80,12 +93,11 @@ downloads it. Musashi is MIT-style. See NOTICES.md.
 ## Later
 
 1. Many "clean" programs in the virus collection are its clean reference copies
-   (`*_UN`, `*_ORG`, `*_CLEAN`); the rest are probably crunched: see 3.
-2. **VirusZ_III.Bootblocks** (VHT, 1,981 harmless boot blocks by name): read its
-   brain format and name known harmless boot blocks instead of "unknown".
-3. **Crunched programs**: run xfdmaster.library (Aminet util/pack/xfdmaster.lha,
-   plus its LIBS:xfd/ slaves) in the same machine to unpack before checking,
-   as VirusZ does. Needs dos `ExNext`/`LoadSeg` for the slaves.
+   (`*_UN`, `*_ORG`, `*_CLEAN`).
+2. ABR's XOR-decoding of encrypted boot blocks (DecodeBB) and its Lamer Exterminator
+   5/9 second pass are not copied; xvs knows those viruses anyway.
+3. xfd slaves that crash leak guest memory (no reset between files); fine for one
+   scan, worth a heap check if BBX keeps one process alive for days.
 4. **Repair**: `amiscan -repair` for link viruses via xvsRepairFile (bound in
    internal/xvs, not offered yet).
 5. **BBX**: see docs/bbx.md.

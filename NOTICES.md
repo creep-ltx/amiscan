@@ -11,7 +11,12 @@ AmiScan contains these works by others.
   (BSD 3-clause), **golang.org/x/text** (BSD 3-clause) and their dependencies,
   as Go modules.
 
-AmiScan does **not** contain xvs.library. It is © 1997-2025 Georg Wittmann,
+AmiScan does **not** contain xvs.library, xfdmaster.library (Georg Hörmann,
+Dirk Stöcker; freely distributable for non-commercial use as the whole
+package) or the Amiga Bootblock Reader database (Jason and Jordan Smith; no
+licence published, so it is only ever fetched from its own repository).
+
+About xvs.library: It is © 1997-2025 Georg Wittmann,
 Alex van Niel and Jan Erik Olausen, freeware for non-commercial use, and may be
 passed on only as its whole unchanged archive. Each user downloads it from
 <https://www.vht-dk.dk/amiga/xvs/xvs.htm>.
