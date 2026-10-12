@@ -31,34 +31,51 @@ const version = "0.1b1"
 const xvsURL = "https://www.vht-dk.dk/amiga/xvs/xvs.htm"
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `AmiScan %s - checks Amiga files, disks and archives for Amiga viruses
+	o := os.Stderr
+	fmt.Fprintf(o, `AmiScan %s - checks Amiga files, disks and archives for Amiga viruses
 
 usage: amiscan [options] FILE|FOLDER ...
        amiscan -update        fetch the newest virus database and unpackers
-       amiscan -list          show every virus xvs.library knows
        amiscan -version       show what is installed
+       amiscan -list          show every virus xvs.library knows
 
 Disk images (ADF, ADZ, DMS, HDF) and archives (LhA, LZX, Zip, 7z, RAR, ...) are
 opened by their contents, also inside each other; packed programs (PowerPacker,
 Imploder, XPK, ...) are unpacked; every file and boot block is checked.
-
-Output (one of):
-  (default)  a report at the end: viruses, damaged files and files not checked,
-             each with where it is and why
-  -bbs       one line per file, for BBS software:  CODE FILE MESSAGE
-               0 FILE is clean
-               1 FILE is infected with VIRUS[, VIRUS...]
-               2 FILE is corrupted: WHERE: WHY
-               3 FILE could not be checked: WHERE: WHY
-  -json      one JSON object per finding, then a summary object
-
-Exit status: the worst code found (0 clean, 1 virus, 2 corrupted, 3 not
-checked). 3 also when AmiScan itself cannot run.
-
-options:
+Options may come before or after the file names. "man amiscan" has it all.
 `, version)
-	flag.PrintDefaults()
-	fmt.Fprintf(os.Stderr, `
+	groups := []struct {
+		title string
+		names []string
+	}{
+		{"What to check", []string{"libs", "max", "max-total"}},
+		{"What to report", []string{"show", "v", "q", "o", "format", "bbs", "json"}},
+		{"Other", []string{"update", "force", "version", "list", "trace"}},
+	}
+	for _, g := range groups {
+		fmt.Fprintf(o, "\n%s:\n", g.title)
+		for _, n := range g.names {
+			f := flag.Lookup(n)
+			if f == nil {
+				continue
+			}
+			arg, help := flag.UnquoteUsage(f)
+			left := "-" + n
+			if arg != "" {
+				left += " " + arg
+			}
+			def := ""
+			if arg != "" && f.DefValue != "" {
+				def = " (default " + f.DefValue + ")"
+			}
+			fmt.Fprintf(o, "  %-18s %s%s\n", left, help, def)
+		}
+	}
+	fmt.Fprintf(o, `
+Results and exit status: 0 clean, 1 virus, 2 damaged, 3 not checked (also
+when AmiScan itself cannot run). -bbs prints one line per file with the same
+numbers, as Amiga BBS file checkers did.
+
 AmiScan works with these parts, which "amiscan -update" downloads from where
 their authors publish them, into %s
 (or the folder named with -libs or AMISCAN_LIBS):
@@ -74,19 +91,19 @@ Without the recommended parts AmiScan still runs, but checks less.
 }
 
 func main() {
-	libs := flag.String("libs", "", "folder with xvs.library")
+	libs := flag.String("libs", "", "use the parts in this `folder`")
 	jsonOut := flag.Bool("json", false, "one JSON object per finding, for programs")
-	bbsOut := flag.Bool("bbs", false, "one line per file: code (0 clean, 1 virus, 2 corrupted, 3 not checked), file, message")
-	showList := flag.String("show", "virus,damaged,unchecked", "what the report lists: virus, damaged, unchecked, clean, all or none")
+	bbsOut := flag.Bool("bbs", false, "one line per file, for BBS software: CODE FILE MESSAGE")
+	showList := flag.String("show", "virus,damaged,unchecked", "what the report lists (`kinds`): virus,damaged,unchecked,clean or all/none")
 	verbose := flag.Bool("v", false, "list the clean files too (same as -show all)")
 	quiet := flag.Bool("q", false, "only the summary line (same as -show none)")
-	maxSize := flag.String("max", "1536M", "biggest file checked or unpacked into, e.g. 300M; memory use is about twice this")
-	maxTotal := flag.String("max-total", "8G", "most one file on disk may unpack to in all (and its own biggest size)")
-	outFile := flag.String("o", "", "write the report to this file; .txt, .md, .html or .json picks the format")
-	format := flag.String("format", "", "report format: text, markdown, html, json or bbs (default: from -o's extension, else text)")
+	maxSize := flag.String("max", "1536M", "biggest file checked or unpacked into (`size`, e.g. 300M); memory is about twice this")
+	maxTotal := flag.String("max-total", "8G", "most one file on disk may unpack to in all, and its own biggest `size`")
+	outFile := flag.String("o", "", "write the report to `file`; .txt .md .html .json pick the format")
+	format := flag.String("format", "", "report `format`: text, markdown, html, json or bbs, whatever -o's extension says")
 	list := flag.Bool("list", false, "list the viruses xvs.library knows")
 	trace := flag.Bool("trace", false, "log every Amiga OS call (debugging)")
-	showVersion := flag.Bool("version", false, "show the versions")
+	showVersion := flag.Bool("version", false, "show the version of AmiScan and of each part")
 	doUpdate := flag.Bool("update", false, "download the newest virus database, unpackers and boot block database")
 	force := flag.Bool("force", false, "with -update: download even when nothing changed")
 	checkLib := flag.String("check-library", "", "") // internal: load one library from -libs, print its version

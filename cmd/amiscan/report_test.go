@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"os"
 	"strings"
 	"testing"
 )
@@ -62,5 +63,21 @@ func TestOptionsFirst(t *testing.T) {
 	got := strings.Join(optionsFirst([]string{"up.lha", "-max", "300M", "-bbs", "-o=r.html", "two.lha", "-bogus", "--", "-name"}), " ")
 	if want := "-max 300M -bbs -o=r.html -bogus -- up.lha two.lha -name"; got != want {
 		t.Fatalf("got %q\nwant %q", got, want)
+	}
+}
+
+// The manual page must name the same version as the program.
+func TestManPageVersion(t *testing.T) {
+	b, err := os.ReadFile("../../man/amiscan.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"AmiScan `+version+`"`) {
+		t.Errorf("man/amiscan.1 .TH does not say AmiScan %s", version)
+	}
+	for _, f := range []string{"-max", "-max-total", "-bbs", "-update", "-show", "-format"} {
+		if !strings.Contains(string(b), strings.ReplaceAll(f, "-", `\-`)) { // roff writes - as \-
+			t.Errorf("man page does not describe %s", f)
+		}
 	}
 }

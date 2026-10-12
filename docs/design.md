@@ -170,4 +170,4 @@ downloads it. Musashi is MIT-style. See NOTICES.md.
    scan, worth a heap check if BBX keeps one process alive for days.
 4. **Repair**: `amiscan -repair` for link viruses via xvsRepairFile (bound in
    internal/xvs, not offered yet).
-5. **BBX**: see docs/bbx.md.
+5. **BBX**: see docs/bbs.md.

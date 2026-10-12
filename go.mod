@@ -1,10 +1,11 @@
 module github.com/creep-ltx/amiscan
 
-go 1.27.1
+go 1.26.0
 
 require (
 	github.com/bodgit/sevenzip v1.6.5
 	github.com/ulikunitz/xz v0.5.17
+	golang.org/x/crypto/x509roots/fallback v0.0.0-20261011195143-3b414e3e8284
 	golang.org/x/text v0.43.0
 )
 
@@ -18,5 +19,4 @@ require (
 	github.com/spf13/afero v1.15.0 // indirect
 	github.com/stangelandcl/ppmd v0.1.1 // indirect
 	go4.org v0.0.0-20260112195520-a5071408f32f // indirect
-	golang.org/x/crypto/x509roots/fallback v0.0.0-20261011195143-3b414e3e8284 // indirect
 )

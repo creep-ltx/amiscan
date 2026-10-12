@@ -1,0 +1,281 @@
+.\" amiscan(1) - Amiga virus scanner
+.TH AMISCAN 1 "2026-10-12" "AmiScan 0.1b1" "User Commands"
+.SH NAME
+amiscan \- check Amiga files, disk images and archives for Amiga viruses
+.SH SYNOPSIS
+.B amiscan
+.RI [ options ]
+.IR file | folder " ..."
+.br
+.B amiscan \-update
+.RB [ \-force ]
+.br
+.B amiscan \-version
+.br
+.B amiscan \-list
+.SH DESCRIPTION
+.B amiscan
+looks for Amiga viruses \(em boot block viruses, file viruses, link viruses
+and data viruses \(em in files, folders, Amiga disk images and archives.
+.PP
+It does not imitate a virus checker: it runs the Amiga's own virus database,
+.BR xvs.library ,
+the one VirusZ\~III, VirusExecutor and VirusChecker\~II use, unchanged, in a
+68020 processor and a small AmigaOS built into the program.
+.PP
+Disk images (ADF, ADZ, DMS, HDF) and archives (LhA, LZX, Zip, 7z, RAR, ARJ,
+ARC, ZOO, CAB, tar, gzip, bzip2, xz) are recognised by their contents, not
+their names, and opened, also inside each other. Packed programs and data
+(PowerPacker, Imploder, StoneCracker, CrunchMania, XPK and about a hundred
+more) are unpacked with
+.B xfdmaster.library
+and
+.BR xpkmaster.library .
+Every file found this way, and every floppy's boot block, is checked. Boot
+blocks also get a second opinion from the
+.I Amiga Bootblock Reader
+database, which names harmless boot blocks and knows some boot viruses
+xvs.library does not.
+.PP
+None of these databases and libraries is part of AmiScan.
+.B amiscan \-update
+downloads them from where their authors publish them (see
+.BR PARTS ).
+.SH OPTIONS
+Options may come before or after the file names;
+.B \-\-
+ends them.
+.SS What to check
+.TP
+.BI \-libs " folder"
+Use the parts in
+.I folder
+instead of the default (see
+.BR FILES ).
+.TP
+.BI \-max " size"
+The biggest file checked or unpacked into, like
+.BR 300M " or " 1.5G
+(default 1536M, the most). Memory use is about twice this at most. A bigger
+file is reported as not checked; if it is not an archive or disk image it is
+not even read.
+.TP
+.BI \-max\-total " size"
+How much one file on disk may unpack to in all, and how big an archive or
+disk image may itself be (default 8G). Archives and disk images are read into
+memory whole.
+.SS What to report
+.TP
+.BI \-show " kinds"
+Which results the report lists, separated by commas:
+.BR virus ", " damaged ", " unchecked ", " clean ,
+or
+.BR all " or " none .
+Default:
+.BR virus,damaged,unchecked .
+.TP
+.B \-v
+List the clean files too (\fB\-show all\fR).
+.TP
+.B \-q
+Only the summary line (\fB\-show none\fR).
+.TP
+.BI \-o " file"
+Write the report to
+.I file
+instead of the terminal, which then gets only the summary. The extension
+picks the format:
+.BR .txt " text, " .md " Markdown, " .html " a web page, " .json " JSON."
+.TP
+.BI \-format " format"
+.BR text ", " markdown ", " html ", " json " or " bbs ,
+whatever the extension of
+.B \-o
+says.
+.TP
+.B \-bbs
+One line per file, for BBS software (see
+.BR "BBS USE" ).
+.TP
+.B \-json
+One JSON object per file and boot block checked, then a summary object.
+.SS Other
+.TP
+.B \-update
+Download the newest parts (see
+.BR PARTS ).
+Only what changed since the last time is fetched. A new part replaces the
+old one only after it has been tried: it must load and pass its own test,
+must not be older, and xvs.library must carry Georg Wittmann's signature.
+The old files are kept in
+.IR libs/old/ ,
+the archives as published in
+.IR libs/archives/ .
+.TP
+.B \-force
+With
+.BR \-update :
+download even when nothing changed.
+.TP
+.B \-version
+Show the version of AmiScan and of each part, and which are missing.
+.TP
+.B \-list
+List every virus xvs.library knows, by kind.
+.TP
+.B \-trace
+Log every call the Amiga code makes to the built-in AmigaOS (for debugging).
+.SH THE REPORT
+At the end
+.B amiscan
+lists, grouped by the file on disk, with where inside it and why:
+.TP
+.B Viruses
+the virus name and kind (boot, file, link or data virus).
+.TP
+.B Damaged
+archive members that are broken (a CRC error, data that ends early) and
+packed programs whose packed data is broken. They are checked as far as they
+unpack, which is what LhA itself would write out. An archive entry that
+holds nothing at all (one byte value repeated, as in the fake entries BBS
+adverts are made of) counts as clean.
+.TP
+.B Not checked
+what could not be checked, and why: a password, a missing part, a size
+limit.
+.PP
+A file unpacked from a packed one appears as
+.IR "name (unpacked PowerPacker 4.0)" .
+.SH BBS USE
+Amiga BBS software ran a file checker on every upload.
+.B amiscan \-bbs
+prints one line per file in that spirit:
+.PP
+.RS
+.nf
+0 UPLOAD.LHA is clean
+1 UPLOAD.LHA is infected with Amixhack, BossNuke 1.5\(ss
+2 UPLOAD.LHA is corrupted: docs/readme: lha: CRC mismatch
+3 UPLOAD.LHA could not be checked: the file itself (packed contents): XPK Crypted needs a password to unpack
+.fi
+.RE
+.PP
+A file with several problems gets the worst: a virus, then corrupted, then
+could not be checked. Software can use the number, the words (AmiExpress
+failed an upload when the checker's output held one of the sysop's words),
+or the exit status, which is the same number. For uploads from strangers,
+limit memory, for example
+.BR "\-max 300M \-max\-total 1G" .
+.SH EXIT STATUS
+The worst result over all files:
+.TP
+.B 0
+nothing found
+.TP
+.B 1
+a virus
+.TP
+.B 2
+a damaged file or archive
+.TP
+.B 3
+something could not be checked; also when
+.B amiscan
+itself cannot run (no xvs.library, a bad option, a failed update).
+.SH PARTS
+.TP
+.B xvs.library
+the virus database, by Georg Wittmann, from the Virus Help Team,
+.UR https://www.vht\-dk.dk/amiga/xvs/xvs.htm
+.UE .
+Needed.
+.TP
+.BR xfdmaster.library " and " xfd/
+unpack packed programs; by Georg H\(:ormann and Dirk St\(:ocker, from Aminet
+(util/pack/xfdmaster.lha). Recommended.
+.TP
+.BR xpkmaster.library " and " compressors/
+unpack XPK files; by Dirk St\(:ocker and others, from Aminet
+(util/pack/xpk_User.lha). Recommended.
+.TP
+.B abr\-brainfile.xml, abr\-searchbrain.xml
+the boot block database of Amiga Bootblock Reader by Jason and Jordan Smith,
+from its GitHub repository. Recommended.
+.PP
+Without the recommended parts
+.B amiscan
+still runs, but checks less;
+.B \-version
+shows what is missing.
+.SH FILES
+The parts folder, the first that holds xvs.library of:
+.TP
+.BI \-libs " folder"
+.TP
+.B $AMISCAN_LIBS
+.TP
+.I ~/.local/share/amiscan/libs
+on Linux (or
+.IR $XDG_DATA_HOME/amiscan/libs );
+.I %AppData%\eAmiScan\elibs
+on Windows;
+.I ~/Library/Application Support/AmiScan/libs
+on macOS
+.TP
+.I libs/
+next to the
+.B amiscan
+program
+.TP
+.IR /usr/local/share/amiscan/libs ", " /usr/share/amiscan/libs
+.PP
+.B \-update
+writes to the folder in use, or else the third one.
+.SH ENVIRONMENT
+.TP
+.B AMISCAN_LIBS
+the parts folder.
+.TP
+.B XDG_DATA_HOME
+on Linux, where the parts folder is by default.
+.SH EXAMPLES
+.TP
+.B amiscan \-update
+Install or update the parts.
+.TP
+.B amiscan ~/Downloads
+Check a folder and list what was found.
+.TP
+.B amiscan \-o report.html ~/Amiga
+Save the report as a web page.
+.TP
+.B amiscan \-bbs \-max 300M \-max\-total 1G upload.lha
+Check an upload for a BBS.
+.TP
+.B amiscan \-show virus \-q game.adf; echo $?
+Only the summary, and the exit status.
+.SH SAFETY
+The Amiga code runs inside
+.BR amiscan 's
+own emulated Amiga. It can read its parts folder and nothing else on the
+computer, and it never runs the files being checked: those are only data
+handed to the virus database. Every call into the Amiga code has a time limit,
+and a crash in it becomes an error, not a crashed program.
+.SH LIMITS
+Files packed with a password cannot be unpacked; they are reported as not
+checked. Very new or rare packers that xfdmaster and XPK do not know are
+checked only as they are.
+.SH AUTHORS
+AmiScan by Tobias Karlsson.
+.PP
+xvs.library \(co Georg Wittmann, Alex van Niel and Jan Erik Olausen.
+xfdmaster.library \(co Georg H\(:ormann and Dirk St\(:ocker.
+XPK \(co Dirk St\(:ocker, Christian von Roques, Urban Dominik M\(:uller and others.
+The boot block database \(co Jason and Jordan Smith.
+The 68000 processor is Musashi by Karl Stenerud.
+.SH SEE ALSO
+The README and the documentation in
+.IR /usr/share/doc/amiscan/ ,
+and
+.UR https://github.com/creep\-ltx/amiscan
+.UE .

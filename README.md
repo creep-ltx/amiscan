@@ -1,143 +1,112 @@
 # AmiScan
 
-Checks Amiga files, disk images and archives for Amiga viruses, on Linux.
+**An Amiga virus scanner for Linux and Windows.** It checks files, folders, Amiga
+disk images and archives for boot, file, link and data viruses, and it was made
+for checking uploads on Amiga-style BBSes the way Amiga file checkers did.
 
-AmiScan is one program file. It runs the Amiga's own virus database,
-**xvs.library** by Georg Wittmann (the one VirusZ III, VirusExecutor and
-VirusChecker II use), in a built-in 68000 processor. Nothing else needs to be
-installed.
+AmiScan doesn't imitate a virus checker. It runs the Amiga's own virus database,
+**xvs.library**, the same one VirusZ III, VirusExecutor and VirusChecker II use,
+unchanged, inside a 68020 processor and a small AmigaOS that are built into the
+program. One file, nothing else to install.
 
-## Setting up
+```
+$ amiscan ~/Amiga/BBS
+AmiScan 0.1b1 with xvs 33.49 (11.04.2025)
 
-1. Put `amiscan` (Linux) or `amiscan.exe` (Windows) anywhere on your path.
-2. Run `amiscan -update`. It downloads into the parts folder
-   (`~/.local/share/amiscan/libs` on Linux, `%AppData%\AmiScan\libs` on
-   Windows, `~/Library/Application Support/AmiScan/libs` on a Mac):
-   - **xvs.library**, the virus database, from the Virus Help Team
-     (<https://www.vht-dk.dk/amiga/xvs/xvs.htm>);
-   - **xfdmaster.library** and its 103 decrunchers from Aminet
-     (<https://aminet.net/util/pack/xfdmaster.lha>), so that programs packed
-     with PowerPacker, Imploder, StoneCracker, CrunchMania and the like are
-     unpacked and their insides checked too;
-   - **xpkmaster.library** and its 16 packer libraries from Aminet
-     (<https://aminet.net/util/pack/xpk_User.lha>), for files packed with XPK
-     (NUKE, SQSH, IMPL, MASH, RAKE, SHRI and the rest);
-   - the **boot block database** of Amiga Bootblock Reader (Jason and Jordan
-     Smith, <https://github.com/jasonthesmith79/AmigaBootBlockReader>): 3,040
-     boot blocks and 314 byte patterns, a second opinion on boot blocks
-     (it knows some boot viruses xvs.library does not) and names for the
-     harmless ones (intros, logos, utilities).
+Viruses (15):
 
-Run `amiscan -update` now and then (AmiScan reminds you after 30 days). It
-only downloads when the Virus Help Team has published something new, and it
-installs a new xvs.library only when:
+  /home/me/Amiga/BBS/BBS Doors/AmiExpress/DEC-SCP.LHA
+      AmixHack0.Exe (unpacked PowerPacker 4.0): Amixhack (file virus)
+  /home/me/Amiga/BBS/BBS Doors/AmiExpress/SMK-STAT.LHA
+      smk-stats/smk-statsv0.1: HappyNewYear 96 (link virus)
+  ...
 
-- it carries Georg Wittmann's signature, checked against his key built into
-  AmiScan (a changed or fake library is refused),
-- it loads and passes its own self test,
-- it is not older than the one you have.
+Damaged, checked as far as they unpack (49):
 
-Only the xvs.library download is signed; the others come over HTTPS from
-Aminet and GitHub, are tried before they replace anything, and their code
-only ever runs inside AmiScan's emulated Amiga. The previous files are kept
-in `libs/old/`, the archives as published in `libs/archives/`. If a library ever needs a key file (xvs.library does not),
-`-update` fetches that too when it is missing.
+  /home/me/Amiga/BBS/BBS Doors/AmiExpress/AFL-UD12.LZX
+      _ADD_TO_BBS/dOORS/uPdOWNiNFO/uPdOWNiNFO.000: lzx: CRC mismatch
+  ...
 
-You can also install xvs.library by hand: take `xvs/libs/xvs.library` out of
-`xvslibrary.lha` and put it in the libs folder. AmiScan looks in these
-folders, first one wins:
+Checked 105508 files (532 of them unpacked) and 8 boot blocks in 18.4s: 15 VIRUSES, 49 damaged.
+```
 
-- the folder named with `-libs`
-- `$AMISCAN_LIBS`
-- `~/.local/share/amiscan/libs` (`$XDG_DATA_HOME/amiscan/libs`)
-- `libs/` next to the `amiscan` program
-- `/usr/local/share/amiscan/libs`, `/usr/share/amiscan/libs`
+## What it does
 
-## Using it
+- **Opens everything:** ADF, ADZ, DMS and HDF disk images; LhA, LZX, Zip, 7z, RAR,
+  ARJ, ARC, ZOO, CAB, tar, gzip, bzip2 and xz archives, also inside each other.
+  Formats are recognised by their contents, not their names.
+- **Unpacks packed programs** (PowerPacker, Imploder, StoneCracker, CrunchMania,
+  XPK and about a hundred more) with the Amiga's own xfdmaster and xpkmaster
+  libraries, and checks what is inside.
+- **Checks every boot block** with xvs.library, with a second opinion from the
+  Amiga Bootblock Reader database (3,040 boot blocks).
+- **Says what it could not check, and why:** damaged archive members are checked
+  as far as they unpack; passwords, size limits and missing parts are reported,
+  never passed as clean.
+- **Reports** on the terminal, or saved as text, Markdown, HTML or JSON.
+- **BBS mode:** one line per upload with a code, as Amiga BBS file checkers did:
+  `0` clean, `1` virus, `2` corrupted, `3` could not check.
+- **Keeps itself current:** `amiscan -update` fetches the newest virus database and
+  unpackers from where their authors publish them, checks the signature of
+  xvs.library and tries every new part before it replaces the old one.
 
-    amiscan Downloads/                 check a folder; report at the end
-    amiscan -bbs upload.lha            one line per file, for BBS software
-    amiscan -json upload.lha           machine-readable, one object per finding
-    amiscan -show virus Downloads/     list only the viruses
-    amiscan -v game.adf                list the clean files too
-    amiscan -q Downloads/              only the summary line
-    amiscan -o report.html Downloads/  the report as a web page (.txt, .md, .html, .json)
-    amiscan -list                      the viruses xvs.library knows
-    amiscan -version                   what is installed
-    amiscan -update                    fetch the newest databases and unpackers
+## Quick start
 
-It opens ADF, ADZ, DMS and HDF disk images, and LhA, LZX, Zip, 7z, RAR, ARJ,
-ARC, ZOO, CAB, tar and gzip/bzip2/xz archives, also inside each other, by
-their contents (a text called `.lha` is a text). It unpacks packed programs
-(PowerPacker, Imploder, StoneCracker, XPK, ...) and checks every file and
-every floppy's boot block.
+1. Download `amiscan` (Linux) or `amiscan.exe` (Windows) from the
+   [releases](https://github.com/creep-ltx/amiscan/releases), or build it (below).
+2. Fetch the virus database and unpackers:
 
-### The report
+       amiscan -update
 
-At the end AmiScan lists, grouped by the file on disk, with where inside
-and why:
+3. Check something:
 
-- **Viruses**: the virus name and kind.
-- **Damaged**: broken archive members (CRC errors, data cut short) and
-  packed programs whose packed data is broken. They were checked as far
-  as they unpack, which is what LhA itself would write out.
-- **Not checked**: what could not be checked at all, and why (a password,
-  a missing unpacker, a size limit).
+       amiscan ~/Downloads
+       amiscan -o report.html ~/Amiga        # the report as a web page
+       amiscan -bbs upload.lha               # one line, for BBS software
 
-`-show` picks which of `virus`, `damaged`, `unchecked`, `clean` are listed
-(default: the first three); `-v` is `-show all`, `-q` is `-show none`.
+`amiscan -h` lists the options; `man amiscan` explains everything.
 
-`-o FILE` saves the report instead: plain text (`.txt`), Markdown (`.md`),
-a web page (`.html`, light or dark as your system is) or JSON (`.json`);
-`-format` overrides the extension. A saved report also says when the scan
-ran, what was checked and which versions of the databases were used; the
-terminal gets the summary line and where the report went.
+## Building and installing
 
-### For BBS software: -bbs
+You need Go 1.26 or newer and a C compiler.
 
-Like the file checkers Amiga BBSes used, one line per file:
+    make
+    sudo make install          # program, manual page, documentation
+    amiscan -update            # as yourself: parts go to your own folder
 
-    0 UPLOAD.LHA is clean
-    1 UPLOAD.LHA is infected with Amixhack, BossNuke 1.5ß
-    2 UPLOAD.LHA is corrupted: path/inside: lha: CRC mismatch (and 2 more)
-    3 UPLOAD.LHA could not be checked: the file itself (packed contents): XPK Crypted needs a password to unpack
+`make amiscan.exe` cross-builds for Windows with MinGW. See
+[docs/installing.md](docs/installing.md) for all of it, including macOS.
 
-The first number is the code: **0** pass, **1** virus, **2** corrupted,
-**3** could not check. A file with several problems gets the worst one,
-in that order of badness: virus, corrupted, could not check.
+## Documentation
 
-Options may come before or after the file names.
+| | |
+|---|---|
+| [Installing](docs/installing.md) | binaries, building, `make install`, the parts folder, Windows and macOS |
+| [Using AmiScan](docs/using.md) | checking, the report, output formats, limits, examples |
+| [For BBS software](docs/bbs.md) | `-bbs` and `-json`, exit codes, AmiExpress-style checking, safe limits |
+| [How it works](docs/how-it-works.md) | the emulated Amiga, the parts, safety, what is and is not checked |
+| [Developing](docs/developing.md) | the code, tests, test samples, adding formats and parts |
+| [Manual page](man/amiscan.1) | `man amiscan` |
 
-### Exit status
+## The parts
 
-The worst code over all files, the same four numbers. **3** also when
-AmiScan itself cannot run (no xvs.library, a bad option).
+AmiScan contains none of these; `amiscan -update` downloads each one from where
+its authors publish it:
 
-## Limits
-
-- `-max SIZE` (default 1536M, e.g. `-max 300M`) is the biggest file AmiScan
-  checks or unpacks into; memory use is about twice that at most. Bigger
-  files are reported as not checked, without being read.
-- `-max-total SIZE` (default 8G) is how much one file on disk (an archive, a
-  disk image) may unpack to in all. An archive or disk image itself may be
-  that big; it is read into memory whole, so for a BBS that takes uploads
-  from strangers set both lower, e.g. `-max 300M -max-total 1G`.
-- Archives nested more than 8 deep, and packed programs that would unpack
-  to more than 64 times their size, are not unpacked further (unpacking
-  bombs); that is reported too.
-- A file that is damaged inside its archive (CRC error, data cut short) is
-  checked as far as it unpacks, which is what LhA itself would write out.
-  The summary counts these; `-v` lists them.
-- Without xfdmaster.library, packed programs are checked only as they are.
-- A file packed with a password cannot be unpacked; the output says so.
+| Part | What it does | From |
+|---|---|---|
+| xvs.library | the virus database (379 boot, 382 file, 107 link, 15 data viruses in 33.49) | [Virus Help Team](https://www.vht-dk.dk/amiga/xvs/xvs.htm), Georg Wittmann |
+| xfdmaster.library | unpacks packed programs | [Aminet](https://aminet.net/package/util/pack/xfdmaster), Georg Hörmann, Dirk Stöcker |
+| xpkmaster.library | unpacks XPK files | [Aminet](https://aminet.net/package/util/pack/xpk_User), Dirk Stöcker and others |
+| boot block database | names boot blocks, knows more boot viruses | [Amiga Bootblock Reader](https://github.com/jasonthesmith79/AmigaBootBlockReader), Jason and Jordan Smith |
 
 ## Thanks
 
-xvs.library is © Georg Wittmann, Alex van Niel and Jan Erik Olausen;
-xfdmaster.library © Georg Hörmann and Dirk Stöcker; XPK © Dirk Stöcker,
-Christian von Roques, Urban Dominik Müller and others; the boot block database
-© Jason and Jordan Smith. None of them is part of AmiScan: each is downloaded
-by you from where its authors publish it.
-All Amiga code runs inside AmiScan's emulated Amiga, which can only read its
-own libs folder. The 68000 is
-Musashi by Karl Stenerud. See [NOTICES.md](NOTICES.md).
+To Georg Wittmann and the Virus Help Team, who still keep xvs.library up to date
+after 30 years; to Georg Hörmann and Dirk Stöcker for xfd and XPK; to Jason and
+Jordan Smith for the Amiga Bootblock Reader; and to Karl Stenerud for Musashi,
+the 68000 inside AmiScan. See [NOTICES.md](NOTICES.md).
+
+## Licence
+
+LICENCE_PLACEHOLDER

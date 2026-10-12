@@ -1,0 +1,80 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: write # to publish releases from tags
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: vet and unit tests
+        run: |
+          go vet ./...
+          go test ./...
+      - name: build
+        shell: bash
+        run: go build -o amiscan-test ./cmd/amiscan
+      - name: fetch the real parts and test against them
+        shell: bash
+        run: |
+          ./amiscan-test -update -libs "$RUNNER_TEMP/libs"
+          ./amiscan-test -version -libs "$RUNNER_TEMP/libs"
+          AMISCAN_LIBS="$RUNNER_TEMP/libs" go test ./...
+      - name: manual page
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y -q groff
+          groff -man -ww -z man/amiscan.1
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    strategy:
+      matrix:
+        include:
+          - { os: ubuntu-latest, name: linux-x86_64 }
+          - { os: windows-latest, name: windows-x86_64 }
+          - { os: macos-latest, name: macos-arm64, goarch: arm64 }
+          - { os: macos-latest, name: macos-x86_64, goarch: amd64 } # cross-built for Intel Macs
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: build
+        shell: bash
+        run: |
+          set -e
+          V=$(sed -n 's/^const version = "\(.*\)"/\1/p' cmd/amiscan/main.go)
+          D="amiscan-$V-${{ matrix.name }}"
+          mkdir -p "$D/man"
+          case "${{ runner.os }}" in
+            Linux)   go build -trimpath -tags osusergo,netgo -ldflags '-s -w -linkmode external -extldflags "-static"' -o "$D/amiscan" ./cmd/amiscan ;;
+            Windows) go build -trimpath -ldflags '-s -w -extldflags "-static"' -o "$D/amiscan.exe" ./cmd/amiscan ;;
+            macOS)   GOARCH=${{ matrix.goarch }} CGO_ENABLED=1 CC="clang -arch $([ ${{ matrix.goarch }} = amd64 ] && echo x86_64 || echo arm64)" \
+                       go build -trimpath -ldflags '-s -w' -o "$D/amiscan" ./cmd/amiscan ;;
+          esac
+          cp README.md NOTICES.md LICENSE "$D/"
+          cp -r docs "$D/"
+          cp man/amiscan.1 "$D/man/"
+          if [ "${{ runner.os }}" = Windows ]; then 7z a -bd "$D.zip" "$D" >/dev/null; else tar -czf "$D.tar.gz" "$D"; fi
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: amiscan-*.*z*
+          generate_release_notes: true
