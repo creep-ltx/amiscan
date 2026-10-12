@@ -1,0 +1,4 @@
+/amiscan
+/dist/
+# xvs.library may only be passed on as its whole, unchanged archive: never commit it
+*.library
