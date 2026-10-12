@@ -19,6 +19,14 @@ file checkers did with broken archives), 3 could not check (a password, a
 missing unpacker, too big; the sysop decides). A file with several problems
 gets the worst: virus, then corrupted, then could not check.
 
+## As AmiExpress did it
+
+AmiExpress ignores a checker's exit code: it shows the checker's output to the
+uploader and fails the upload if any line contains one of the sysop's ERROR.n words
+(Knowledge/bbs/amiexpress-filecheck.md). For the same behaviour, run
+`amiscan -bbs`, show the line, and fail on "infected" or "corrupted" (the sysop's
+choice); or use the exit status / leading code.
+
 ## Everything: -json
 
 One object per finding:
