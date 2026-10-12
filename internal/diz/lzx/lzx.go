@@ -167,12 +167,15 @@ func (rd *Reader) ReadFile(f *File, limit int64) (out []byte, err error) {
 	switch g.mode {
 	case 0:
 		if int64(len(packed)) < f.offset+want {
+			if int64(len(packed)) > f.offset {
+				return packed[f.offset:], io.ErrUnexpectedEOF
+			}
 			return nil, io.ErrUnexpectedEOF
 		}
 		out = packed[f.offset : f.offset+want]
 	case 2:
 		if out, err = decrunch(packed, f.offset, want); err != nil {
-			return nil, err
+			return out, fmt.Errorf("%w in %s", err, f.Name) // the part before the damage
 		}
 	default:
 		return nil, fmt.Errorf("lzx: unknown pack mode %d", g.mode)

@@ -19,16 +19,19 @@ import (
 	"github.com/creep-ltx/amiscan/internal/m68k"
 )
 
-// Memory map.
+// Memory map: "chip" RAM below the CIA and custom chip ranges, as on any
+// Amiga, and 2 GB of fast RAM from 16 MB up, as on an accelerator card.
 const (
-	RAMSize     = 0xbe0000 // below the CIA and custom chip ranges
-	vectorStubs = 0x400    // 256 x (ILLEGAL, trap) = 1 KiB
-	stopStub    = 0x800    // a guest call returns here
+	lowEnd      = 0xbe0000
+	fastStart   = 0x01000000
+	RAMSize     = fastStart + 0x7f000000 // 2 GB of fast RAM
+	vectorStubs = 0x400                  // 256 x (ILLEGAL, trap) = 1 KiB
+	stopStub    = 0x800                  // a guest call returns here
 	heapStart   = 0x1000
 	stackSize   = 0x10000
-	superStack  = RAMSize - stackSize // supervisor stack top
-	userStack   = superStack - 0x100  // user stack top
-	heapEnd     = RAMSize - 2*stackSize
+	superStack  = lowEnd - stackSize // supervisor stack top
+	userStack   = superStack - 0x100 // user stack top
+	heapEnd     = lowEnd - 2*stackSize
 )
 
 const (
@@ -70,7 +73,7 @@ func New(libsDir string) *Machine {
 	// A 68020 (on a 24-bit bus, like an A1200's): runs all 68000 code, and
 	// some xfd decrunchers need 020 instructions.
 	m.CPU = m68k.New(RAMSize, m68k.CPU68020, m.trap)
-	m.heap.init(heapStart, heapEnd)
+	m.heap.init(span{heapStart, heapEnd - heapStart}, span{fastStart, RAMSize - fastStart})
 	m.files.init()
 	c := m.CPU
 	for v := uint32(0); v < 256; v++ {
@@ -132,8 +135,15 @@ func vectorName(v uint32) string {
 	return "exception"
 }
 
-func (m *Machine) trap(pc uint32, id uint16) bool {
+func (m *Machine) trap(pc uint32, id uint16) (handled bool) {
 	c := m.CPU
+	defer func() {
+		// a bad pointer from the guest must not take AmiScan down
+		if r := recover(); r != nil {
+			c.Fail(fmt.Errorf("OS call from $%06x failed: %v", pc, r))
+			handled = true
+		}
+	}()
 	switch {
 	case id == trapStop:
 		c.Stop()
@@ -229,13 +239,27 @@ func (m *Machine) PutString(s string) uint32 {
 func (m *Machine) Alloc(size uint32, clear bool) uint32 {
 	a := m.heap.alloc(size)
 	if a != 0 && clear {
-		ramClear(m.CPU.RAM[a : a+size])
+		if size >= 1<<20 {
+			m.CPU.Discard(a, size) // fresh zero pages, without touching them
+			ramClear(m.CPU.RAM[a : a+min(size, 4096)])
+			if size > 4096 {
+				end := a + size
+				ramClear(m.CPU.RAM[end-min(size, 8192) : end]) // the partial pages at the ends
+			}
+		} else {
+			ramClear(m.CPU.RAM[a : a+size])
+		}
 	}
 	return a
 }
 
-// Free returns memory from Alloc.
-func (m *Machine) Free(a uint32) { m.heap.free(a) }
+// Free returns memory from Alloc. Big blocks go back to the host too.
+func (m *Machine) Free(a uint32) {
+	if size, ok := m.heap.used[a]; ok && size >= 1<<20 {
+		m.CPU.Discard(a, size)
+	}
+	m.heap.free(a)
+}
 
 // Copy puts host bytes into newly allocated guest memory.
 func (m *Machine) Copy(b []byte) uint32 {
@@ -257,8 +281,8 @@ type allocator struct {
 	used  map[uint32]uint32
 }
 
-func (h *allocator) init(lo, hi uint32) {
-	h.spans = []span{{lo, hi - lo}}
+func (h *allocator) init(regions ...span) {
+	h.spans = append([]span(nil), regions...)
 	h.used = map[uint32]uint32{}
 }
 
@@ -318,6 +342,9 @@ func (m *Machine) Write32(a uint32, v uint32) { m.w32(a, v) }
 func (m *Machine) Bytes(a, n uint32) []byte {
 	if uint64(a)+uint64(n) > RAMSize {
 		return nil
+	}
+	if uint64(a)+uint64(n) > lowEnd && a < fastStart {
+		return nil // runs into the chip ranges
 	}
 	return m.CPU.RAM[a : a+n]
 }

@@ -305,7 +305,7 @@ func (rd *Reader) ReadFile(f *File, limit int64) (out []byte, err error) {
 	switch f.Method {
 	case "-lh0-", "-lz4-":
 		if int64(len(packed)) < want {
-			return nil, io.ErrUnexpectedEOF
+			return packed, io.ErrUnexpectedEOF
 		}
 		out = packed
 	case "-lh1-":
@@ -322,7 +322,8 @@ func (rd *Reader) ReadFile(f *File, limit int64) (out []byte, err error) {
 		return nil, fmt.Errorf("lha: method %s not supported", f.Method)
 	}
 	if err != nil {
-		return nil, err
+		// what was decoded before the damage: LhA writes it out too
+		return out, fmt.Errorf("%w in %s", err, f.Name)
 	}
 	if !partial && CRC16(out) != f.CRC {
 		return out, fmt.Errorf("lha: CRC mismatch in %s", f.Name)

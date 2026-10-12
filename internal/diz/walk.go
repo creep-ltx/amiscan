@@ -19,6 +19,9 @@ type Item struct {
 	Path string // outer file, then members joined with '/', e.g. "disk.dms/c/dir"
 	Data []byte
 	Boot bool // Data is a floppy boot block (1024 bytes), not a file
+	// Damaged says why the archive could not give the whole file; Data is
+	// then the part that unpacked (what LhA itself would write out).
+	Damaged string
 }
 
 // Limits bound how far Walk unpacks, against archive bombs.
@@ -30,22 +33,23 @@ type Limits struct {
 
 // Walk calls fn for data itself and, when data is an archive or disk image
 // it can read, for its boot block and every file inside, recursively.
-// Problems inside (a damaged archive, a limit reached) go to warn; Walk
-// itself stops only when fn returns an error.
-func Walk(name string, data []byte, lim Limits, fn func(Item) error, warn func(path string, err error)) error {
+// Problems inside go to warn: damaged is true when nobody can read the part
+// in question (a broken archive), false when Walk chose not to (a limit).
+// Walk itself stops only when fn returns an error.
+func Walk(name string, data []byte, lim Limits, fn func(Item) error, warn func(path string, err error, damaged bool)) error {
 	w := &walker{lim: lim, fn: fn, warn: warn}
-	return w.walk(name, data, 0)
+	return w.walk(name, data, 0, "")
 }
 
 type walker struct {
 	lim   Limits
 	total int64
 	fn    func(Item) error
-	warn  func(string, error)
+	warn  func(string, error, bool)
 }
 
-func (w *walker) walk(name string, data []byte, depth int) (err error) {
-	if err := w.fn(Item{Path: name, Data: data}); err != nil {
+func (w *walker) walk(name string, data []byte, depth int, damaged string) (err error) {
+	if err := w.fn(Item{Path: name, Data: data, Damaged: damaged}); err != nil {
 		return err
 	}
 	// a boot block saved as a file (a virus collection's, or a .bb backup)
@@ -62,12 +66,12 @@ func (w *walker) walk(name string, data []byte, depth int) (err error) {
 		return nil
 	}
 	if depth >= w.lim.Depth {
-		w.warn(name, fmt.Errorf("%s inside %d archives: not unpacked", f.name, depth))
+		w.warn(name, fmt.Errorf("%s inside %d archives: not unpacked", f.name, depth), false)
 		return nil
 	}
 	defer func() {
 		if r := recover(); r != nil { // a decoder bug on strange data must not stop the scan
-			w.warn(name, fmt.Errorf("%s is damaged: %v", f.name, r))
+			w.warn(name, fmt.Errorf("%s is damaged: %v", f.name, r), true)
 		}
 	}()
 	if boot := bootBlock(f.name, data); boot != nil {
@@ -77,10 +81,16 @@ func (w *walker) walk(name string, data []byte, depth int) (err error) {
 	}
 	ms, _, ok := listAll(bytes.NewReader(data), int64(len(data)), f)
 	if !ok {
-		// a program that only looks like a self-extractor, or a disk without
-		// AmigaDOS files, is not a problem: the file itself was checked
-		if f.name != "adf" && f.name != "adz" && f.name != "dms" && f.name != "sfx" && f.name != "hdf" {
-			w.warn(name, fmt.Errorf("cannot read it as %s", f.name))
+		// The file itself was checked. Say so only when it really starts like
+		// that kind of archive: a text called History.lha is no archive, and
+		// a program that looks like a self-extractor or a disk without
+		// AmigaDOS files is not a problem.
+		byMagic := f.magic != nil && f.magic(head, int64(len(data)))
+		if f.name == "lzx" && (len(head) < 4 || head[3] != 0) {
+			byMagic = false // a script that starts with the word LZX; archives have "LZX\0"
+		}
+		if byMagic && f.name != "adf" && f.name != "adz" && f.name != "dms" && f.name != "sfx" && f.name != "hdf" {
+			w.warn(name, fmt.Errorf("starts like %s but its contents cannot be read", f.name), true)
 		}
 		return nil
 	}
@@ -90,20 +100,24 @@ func (w *walker) walk(name string, data []byte, depth int) (err error) {
 		}
 		limit := min(w.lim.File, w.lim.Total-w.total)
 		if limit <= 0 {
-			w.warn(name, fmt.Errorf("more than %d MB unpacked: the rest is not checked", w.lim.Total>>20))
+			w.warn(name, fmt.Errorf("more than %d MB unpacked: the rest is not checked", w.lim.Total>>20), false)
 			return nil
 		}
 		b, rerr := m.read(limit + 1)
+		damaged := ""
 		if rerr != nil {
-			w.warn(name+"/"+m.name, rerr)
-			continue
+			if len(b) == 0 {
+				w.warn(name+"/"+m.name, rerr, true)
+				continue
+			}
+			damaged = rerr.Error() // check the part that unpacked
 		}
 		if int64(len(b)) > limit {
-			w.warn(name+"/"+m.name, fmt.Errorf("bigger than %d MB: not checked", limit>>20))
+			w.warn(name+"/"+m.name, fmt.Errorf("bigger than %d MB: not checked", limit>>20), false)
 			continue
 		}
 		w.total += int64(len(b))
-		if err := w.walk(name+"/"+m.name, b, depth+1); err != nil {
+		if err := w.walk(name+"/"+m.name, b, depth+1, damaged); err != nil {
 			return err
 		}
 	}

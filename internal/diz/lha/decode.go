@@ -159,17 +159,17 @@ func decodeStatic(packed []byte, want int64, dicbit uint) ([]byte, error) {
 	w := newWindow(dicbit, want)
 	for !w.done() {
 		if d.br.overrun() {
-			return nil, errCorrupt
+			return w.out, errCorrupt
 		}
 		if d.blockSize == 0 {
 			if err := d.readBlock(); err != nil {
-				return nil, err
+				return w.out, err
 			}
 		}
 		d.blockSize--
 		c, err := d.c.decode(d.br)
 		if err != nil {
-			return nil, err
+			return w.out, err
 		}
 		if c < 256 {
 			w.put(byte(c))
@@ -177,7 +177,7 @@ func decodeStatic(packed []byte, want int64, dicbit uint) ([]byte, error) {
 		}
 		p, err := d.p.decode(d.br)
 		if err != nil {
-			return nil, err
+			return w.out, err
 		}
 		if p > 1 {
 			p = 1<<(p-1) + d.br.bits(uint(p-1))

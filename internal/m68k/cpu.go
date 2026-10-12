@@ -54,8 +54,11 @@ func New(ramSize uint32, cpuType int, h TrapHandler) *CPU {
 	if current != nil {
 		panic("m68k: only one CPU per process")
 	}
-	ram := (*[1 << 30]byte)(C.malloc(C.size_t(ramSize)))[:ramSize:ramSize]
-	clear(ram)
+	p := C.amiscan_map_ram(C.uint32_t(ramSize))
+	if p == nil {
+		panic("m68k: cannot reserve guest memory")
+	}
+	ram := unsafe.Slice((*byte)(unsafe.Pointer(p)), ramSize) // zero, pages made on first touch
 	c := &CPU{RAM: ram, handler: h}
 	current = c
 	C.amiscan_init((*C.uint8_t)(unsafe.Pointer(&ram[0])), C.uint32_t(ramSize), C.int(cpuType))
@@ -77,6 +80,10 @@ func goIllegal(opcode C.uint) C.int {
 	}
 	return 1
 }
+
+// Discard tells the host it may drop the memory of [addr, addr+n): the
+// guest reads zeros there afterwards.
+func (c *CPU) Discard(addr, n uint32) { C.amiscan_discard(C.uint32_t(addr), C.uint32_t(n)) }
 
 // Stop ends Run after the current instruction.
 func (c *CPU) Stop() {
@@ -148,7 +155,9 @@ func (c *CPU) Disassemble(pc uint32) string {
 	return fmt.Sprintf("%06x: %-30s (%d bytes)", pc, C.GoString(&buf[0]), n)
 }
 
-func (c *CPU) in(a, n uint32) bool { return uint64(a)+uint64(n) <= uint64(len(c.RAM)) }
+func (c *CPU) in(a, n uint32) bool {
+	return uint64(a)+uint64(n) <= uint64(len(c.RAM)) && !(a >= 0xbf0000 && a < 0xc00000) && !(a >= 0xdf0000 && a < 0xe00000)
+}
 
 func (c *CPU) Read8(a uint32) uint8 {
 	if !c.in(a, 1) {

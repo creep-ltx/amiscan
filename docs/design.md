@@ -45,8 +45,14 @@ exception vector points at its own stub (trap $F000 + vector), so a crash in the
 library becomes an `ErrCrash` naming the vector and PC instead of taking the
 program down. Every call has a cycle budget, so a loop cannot hang a scan.
 
-Memory map: RAM $000000-$BE0000 (24-bit, 68000). Vectors at 0, stubs at $400,
-heap $1000 up to the stacks at the top. Reads of $BFxxxx/$DFxxxx return 0
+Memory map (since 2026-10-12): a 68020 with full 32-bit addresses. "Chip" RAM
+$000000-$BE0000 (vectors at 0, stubs at $400, heap from $1000, stacks at the top)
+and 2 GB of fast RAM from $01000000. The host reserves it with mmap(MAP_NORESERVE)
+so only touched pages cost memory; Free of a block of 1 MB or more madvises it
+back (MADV_DONTNEED), and a cleared big Alloc does the same instead of writing
+zeros. A panic in a Go OS call (bad guest pointer) is caught and becomes a
+failed call, never a dead process. Measured: a 700 MB file checks in 0.4 s,
+peak RSS 1.4 GB (the file plus its copy in guest RAM). Reads of $BFxxxx/$DFxxxx return 0
 (xvs.library reads VHPOSR at $DFF006/7 for a random number). Anything else
 outside RAM reads 0 and is counted.
 
@@ -62,6 +68,19 @@ What xvs.library needs, found by tracing it under vamos (see
 
 Only one CPU per process (Musashi is global C state). BBX should run one
 AmiScan per scan, or one long-lived scanner behind a lock.
+
+## Damaged archives (2026-10-12)
+
+On the user's 61,859-file BBS door collection 255 items were "not checked": 165
+were a 112-byte BBS advert LhA claiming 20 MB from 7 bytes, the rest real damage
+(the reference `lha t` and `unlzx` report the same errors on every one tested) or
+text files merely named .lha. Now the lha/lzx readers return what decoded before
+the damage, Walk passes it on with Item.Damaged and it is checked ("checked as far
+as it unpacks", like LhA writing out a CRC-error file); extension-only matches are
+silent (a real LZX starts "LZX\0"). Result: 5 not checked, 202 damaged-but-checked.
+In the virus collection that turned up one more virus (Mpeople.exe, CRC mismatch).
+Remaining "not checked" are packed files that are themselves broken (xfdDecrunch
+under vamos agrees on EoC.exe) and one XPK file (needs xpkmaster.library).
 
 ## Updating (internal/update)
 

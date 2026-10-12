@@ -264,7 +264,12 @@ func (m *Machine) setupDos() {
 			ret(0xffffffff)
 			return
 		}
-		n := copy(c.RAM[d(2):d(2)+min(d(3), RAMSize-d(2))], h.data[h.pos:])
+		dst := m.Bytes(d(2), min(d(3), uint32(len(h.data)-h.pos)))
+		if dst == nil {
+			ret(0xffffffff)
+			return
+		}
+		n := copy(dst, h.data[h.pos:])
 		h.pos += n
 		ret(uint32(n))
 	}

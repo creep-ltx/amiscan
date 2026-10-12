@@ -327,13 +327,16 @@ func listViruses(s *xvs.Scanner) int {
 type finding struct {
 	Path   string `json:"path"`
 	Kind   string `json:"kind"`             // "file" or "boot"
-	Result string `json:"result"`           // "clean", "virus", "skipped", "error"
+	Result string `json:"result"`           // "clean", "virus", "damaged", "skipped", "error"
 	Virus  string `json:"virus,omitempty"`  // virus name
 	Type   string `json:"type,omitempty"`   // "boot virus", "link virus", ...; for clean items what it is
 	Detail string `json:"detail,omitempty"` // why skipped or the error
 	// FoundBy is "xvs" or "bootblock database" for a virus; for a boot
 	// block the database names, Type holds its name and class.
 	FoundBy string `json:"found_by,omitempty"`
+	// Damaged: the archive could not give the whole file (why); the part
+	// that unpacked was checked, which is what LhA itself would write out.
+	Damaged string `json:"damaged,omitempty"`
 }
 
 type reporter struct {
@@ -344,15 +347,15 @@ type reporter struct {
 	verbose bool
 	start   time.Time
 
-	files, boots, unpacked, viruses, skipped, errs int
+	files, boots, unpacked, viruses, skipped, errs, damaged int
 }
 
 // maxLayers is how many times a file packed inside a packed file is unpacked.
 const maxLayers = 5
 
-var limits = diz.Limits{Depth: 6, Total: 1 << 30, File: 256 << 20}
+var limits = diz.Limits{Depth: 8, Total: 8 << 30, File: xvs.MaxFileSize}
 
-const maxTopFile = 1 << 30
+const maxTopFile = 8 << 30 // a hard disk image; its files are checked one by one
 
 func (r *reporter) scanPath(arg string) {
 	err := filepath.WalkDir(arg, func(p string, d fs.DirEntry, err error) error {
@@ -364,7 +367,7 @@ func (r *reporter) scanPath(arg string) {
 			return nil
 		}
 		if info, err := d.Info(); err == nil && info.Size() > maxTopFile {
-			r.report(finding{Path: p, Kind: "file", Result: "skipped", Detail: "bigger than 1 GB"})
+			r.report(finding{Path: p, Kind: "file", Result: "skipped", Detail: "bigger than 8 GB"})
 			return nil
 		}
 		data, err := os.ReadFile(p)
@@ -372,7 +375,11 @@ func (r *reporter) scanPath(arg string) {
 			r.report(finding{Path: p, Kind: "file", Result: "error", Detail: err.Error()})
 			return nil
 		}
-		diz.Walk(p, data, limits, r.check, func(path string, err error) {
+		diz.Walk(p, data, limits, r.check, func(path string, err error, damaged bool) {
+			if damaged {
+				r.report(finding{Path: path, Kind: "file", Result: "damaged", Detail: err.Error()})
+				return
+			}
 			r.report(finding{Path: path, Kind: "file", Result: "skipped", Detail: err.Error()})
 		})
 		return nil
@@ -411,9 +418,9 @@ func (r *reporter) check(it diz.Item) error {
 		r.report(f)
 		return nil
 	}
-	f := finding{Path: it.Path, Kind: "file"}
+	f := finding{Path: it.Path, Kind: "file", Damaged: it.Damaged}
 	if len(it.Data) > xvs.MaxFileSize {
-		f.Result, f.Detail = "skipped", fmt.Sprintf("bigger than %d MB, too big for xvs.library", xvs.MaxFileSize>>20)
+		f.Result, f.Detail = "skipped", fmt.Sprintf("bigger than %d MB, too big for the emulated Amiga", xvs.MaxFileSize>>20)
 		r.report(f)
 		return nil
 	}
@@ -443,6 +450,11 @@ func (r *reporter) unpack(it diz.Item, layer int, infected bool) {
 		return
 	}
 	inside := it.Path + " (packed contents)"
+	if err != nil && it.Damaged != "" {
+		// a packed file cut short by a damaged archive cannot unpack; it is
+		// already counted as damaged and checked as far as it goes
+		return
+	}
 	switch {
 	case errors.Is(err, xfd.ErrLocked):
 		r.report(finding{Path: inside, Kind: "file", Result: "skipped", Detail: packer + " needs a password to unpack"})
@@ -454,7 +466,7 @@ func (r *reporter) unpack(it diz.Item, layer int, infected bool) {
 		return
 	}
 	r.unpacked++
-	inner := diz.Item{Path: it.Path + " (unpacked " + packer + ")", Data: out}
+	inner := diz.Item{Path: it.Path + " (unpacked " + packer + ")", Data: out, Damaged: it.Damaged}
 	f := finding{Path: inner.Path, Kind: "file"}
 	res, err := r.s.CheckFile(out)
 	switch {
@@ -473,8 +485,11 @@ func (r *reporter) report(f finding) {
 	switch {
 	case f.Kind == "boot":
 		r.boots++
-	case f.Result != "skipped":
+	case f.Result != "skipped" && f.Result != "damaged":
 		r.files++
+	}
+	if f.Damaged != "" || f.Result == "damaged" {
+		r.damaged++
 	}
 	switch f.Result {
 	case "virus":
@@ -500,7 +515,17 @@ func (r *reporter) report(f finding) {
 		fmt.Printf("%s: ERROR %s\n", f.Path, f.Detail)
 	case "skipped":
 		fmt.Printf("%s: NOT CHECKED, %s\n", f.Path, f.Detail)
+	case "damaged":
+		if r.verbose {
+			fmt.Printf("%s: damaged, %s (the file itself was checked)\n", f.Path, f.Detail)
+		}
 	default:
+		if f.Damaged != "" {
+			if r.verbose {
+				fmt.Printf("%s: ok as far as it unpacks (damaged: %s)\n", f.Path, f.Damaged)
+			}
+			return
+		}
 		if r.verbose {
 			t := f.Type
 			if f.Kind != "boot" {
@@ -523,7 +548,7 @@ func (r *reporter) finish() int {
 	if r.json {
 		b, _ := json.Marshal(map[string]any{
 			"summary": true, "files": r.files, "bootblocks": r.boots, "unpacked": r.unpacked, "viruses": r.viruses,
-			"skipped": r.skipped, "errors": r.errs, "seconds": took.Seconds(), "exit": code,
+			"skipped": r.skipped, "errors": r.errs, "damaged": r.damaged, "seconds": took.Seconds(), "exit": code,
 		})
 		fmt.Println(string(b))
 		return code
@@ -549,5 +574,12 @@ func (r *reporter) finish() int {
 		fmt.Printf(", %d not checked", r.skipped+r.errs)
 	}
 	fmt.Println(".")
+	if r.damaged > 0 {
+		fmt.Printf("%s damaged in their archives: checked as far as they unpack", plural(r.damaged, "file was", "files were"))
+		if !r.verbose {
+			fmt.Print(" (-v lists them)")
+		}
+		fmt.Println(".")
+	}
 	return code
 }

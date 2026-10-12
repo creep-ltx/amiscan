@@ -45,7 +45,7 @@ const (
 
 // MaxSize is the largest file handed to xfdmaster (it needs room for the
 // unpacked copy too).
-const MaxSize = 2 << 20
+const MaxSize = 512 << 20
 
 // Decruncher is a loaded xfdmaster.library.
 type Decruncher struct {

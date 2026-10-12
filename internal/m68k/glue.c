@@ -1,5 +1,6 @@
 #include "glue.h"
 #include "musashi/m68k.h"
+#include <sys/mman.h>
 
 uint8_t *amiscan_ram;
 uint32_t amiscan_ram_size;
@@ -9,8 +10,8 @@ uint32_t amiscan_hw_accesses;
 
 extern int goIllegal(unsigned int opcode); // cpu.go
 
-// 24-bit address bus, as on a 68000.
-#define ADDR(a) ((a) & 0xffffff)
+// Full 32-bit addresses (a 68020 with fast RAM above 16 MB).
+#define ADDR(a) (a)
 
 static inline int is_hw(uint32_t a) {
 	// CIA ($BFxxxx) and custom chips ($DFxxxx). xvs.library peeks at
@@ -19,9 +20,9 @@ static inline int is_hw(uint32_t a) {
 }
 
 static inline int ok(uint32_t a, uint32_t n) {
-	if (a + n <= amiscan_ram_size) return 1;
-	if (is_hw(a)) amiscan_hw_accesses++;
-	else { amiscan_bad_accesses++; amiscan_last_bad = a; }
+	if (is_hw(a)) { amiscan_hw_accesses++; return 0; }
+	if ((uint64_t)a + n <= amiscan_ram_size) return 1;
+	amiscan_bad_accesses++; amiscan_last_bad = a;
 	return 0;
 }
 
@@ -60,6 +61,18 @@ unsigned int m68k_read_disassembler_16(unsigned int a) { return m68k_read_memory
 unsigned int m68k_read_disassembler_32(unsigned int a) { return m68k_read_memory_32(a); }
 
 static int illg(int opcode) { return goIllegal(opcode); }
+
+// RAM is reserved address space: the host only spends memory on the
+// pages the guest touches, and amiscan_discard gives them back.
+uint8_t *amiscan_map_ram(uint32_t size) {
+	void *p = mmap(0, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+	return p == MAP_FAILED ? 0 : p;
+}
+
+void amiscan_discard(uint32_t addr, uint32_t len) {
+	uint64_t page = 4096, lo = ((uint64_t)addr + page - 1) & ~(page - 1), hi = ((uint64_t)addr + len) & ~(page - 1);
+	if (hi > lo && hi <= amiscan_ram_size) madvise(amiscan_ram + lo, hi - lo, MADV_DONTNEED);
+}
 
 void amiscan_init(uint8_t *ram, uint32_t size, int cpu_type) {
 	amiscan_ram = ram;

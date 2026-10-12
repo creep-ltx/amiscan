@@ -66,8 +66,13 @@ not be checked (named in the output).
 
 ## Limits
 
-- Files bigger than 4 MB are not checked (they do not fit in the emulated
-  Amiga's memory). They are named in the output.
+- Files up to 1.5 GB are checked whole (the emulated Amiga has 2 GB of fast
+  RAM; your PC only spends memory on what a file needs, about twice its
+  size while it is checked). Disk images up to 8 GB are opened and their
+  files checked one by one.
+- A file that is damaged inside its archive (CRC error, data cut short) is
+  checked as far as it unpacks, which is what LhA itself would write out.
+  The summary counts these; `-v` lists them.
 - Without xfdmaster.library, packed programs are checked only as they are.
 - A file packed with a password cannot be unpacked; the output says so.
 

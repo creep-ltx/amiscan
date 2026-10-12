@@ -148,7 +148,7 @@ func decodeLH1(packed []byte, want int64) ([]byte, error) {
 	w := newWindow(12, want)
 	for !w.done() {
 		if br.overrun() {
-			return nil, errCorrupt
+			return w.out, errCorrupt
 		}
 		c := d.decode(br)
 		if c < 256 {
@@ -157,7 +157,7 @@ func decodeLH1(packed []byte, want int64) ([]byte, error) {
 		}
 		hi, err := lh1Position.decode(br)
 		if err != nil {
-			return nil, err
+			return w.out, err
 		}
 		p := hi<<6 | br.bits(6)
 		w.copyMatch(p, c-253)

@@ -77,13 +77,19 @@ func (m *Machine) setupExec() {
 	}
 	m.AddTail(sb+ExecBase_LibList, sb)
 	// one memory header covering the heap, so TypeOfMem and friends work
-	mh := m.Alloc(SizeofMemHeader, true)
-	m.w8(mh+Node_ln_Type, NTMemory)
-	m.w32(mh+Node_ln_Name, m.PutString("fast memory"))
-	m.w16(mh+MemHeader_mh_Attributes, memfPublic|memfFast)
-	m.w32(mh+MemHeader_mh_Lower, heapStart)
-	m.w32(mh+MemHeader_mh_Upper, heapEnd)
-	m.AddTail(sb+ExecBase_MemList, mh)
+	for _, r := range []struct {
+		name   string
+		lo, hi uint32
+		attr   uint16
+	}{{"chip memory", heapStart, heapEnd, memfPublic | memfChip}, {"expansion memory", fastStart, RAMSize - 1, memfPublic | memfFast}} {
+		mh := m.Alloc(SizeofMemHeader, true)
+		m.w8(mh+Node_ln_Type, NTMemory)
+		m.w32(mh+Node_ln_Name, m.PutString(r.name))
+		m.w16(mh+MemHeader_mh_Attributes, r.attr)
+		m.w32(mh+MemHeader_mh_Lower, r.lo)
+		m.w32(mh+MemHeader_mh_Upper, r.hi)
+		m.AddTail(sb+ExecBase_MemList, mh)
+	}
 	m.w32(sb+ExecBase_ResModules, m.Alloc(4, true)) // empty, NULL-terminated
 
 	// the one process everything runs in
@@ -133,15 +139,23 @@ func (m *Machine) setupExec() {
 		}
 	}
 	f["TypeOfMem"] = func() {
-		if a(1) >= heapStart && a(1) < heapEnd {
+		switch {
+		case a(1) >= heapStart && a(1) < heapEnd:
+			ret(memfPublic | memfChip)
+		case a(1) >= fastStart && a(1) < RAMSize:
 			ret(memfPublic | memfFast)
-		} else {
+		default:
 			ret(0)
 		}
 	}
 	f["Allocate"] = func() { ret(m.allocate(a(0), d(0))) }
 	f["Deallocate"] = func() { m.deallocate(a(0), a(1), d(0)) }
-	f["CopyMem"] = func() { copy(c.RAM[a(1):a(1)+d(0)], c.RAM[a(0):a(0)+d(0)]) }
+	f["CopyMem"] = func() {
+		src, dst := m.Bytes(a(0), d(0)), m.Bytes(a(1), d(0))
+		if src != nil && dst != nil {
+			copy(dst, src)
+		}
+	}
 	f["CopyMemQuick"] = f["CopyMem"]
 	f["AddHead"] = func() { m.AddHead(a(0), a(1)) }
 	f["AddTail"] = func() { m.AddTail(a(0), a(1)) }

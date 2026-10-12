@@ -53,9 +53,9 @@ const (
 	BootVirus      = 4
 )
 
-// MaxFileSize is the largest file that fits in guest memory with room to
-// spare for the library's own work.
-const MaxFileSize = 4 << 20
+// MaxFileSize is the largest file checked: the emulated Amiga has 2 GB of
+// fast RAM, of which the host only spends what is used.
+const MaxFileSize = 1536 << 20
 
 // Scanner is a loaded and opened xvs.library.
 type Scanner struct {
