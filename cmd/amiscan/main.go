@@ -56,10 +56,18 @@ options:
 `, version)
 	flag.PrintDefaults()
 	fmt.Fprintf(os.Stderr, `
-AmiScan needs xvs.library, the virus database, from the Virus Help Team
-(%s). "amiscan -update" fetches it into
-%s (or the folder named with -libs or AMISCAN_LIBS).
-`, xvsURL, defaultLibs()[0])
+AmiScan works with these parts, which "amiscan -update" downloads from where
+their authors publish them, into %s
+(or the folder named with -libs or AMISCAN_LIBS):
+
+  xvs.library          the virus database (Virus Help Team)      needed
+  xfdmaster.library    unpacks packed programs (Aminet)          recommended
+  xpkmaster.library    unpacks XPK files (Aminet)                recommended
+  boot block database  names boot blocks, knows more boot        recommended
+                       viruses (Amiga Bootblock Reader, GitHub)
+
+Without the recommended parts AmiScan still runs, but checks less.
+`, defaultLibs()[0])
 }
 
 func main() {
@@ -72,7 +80,7 @@ func main() {
 	list := flag.Bool("list", false, "list the viruses xvs.library knows")
 	trace := flag.Bool("trace", false, "log every Amiga OS call (debugging)")
 	showVersion := flag.Bool("version", false, "show the versions")
-	doUpdate := flag.Bool("update", false, "download the newest xvs.library (and any key files it needs)")
+	doUpdate := flag.Bool("update", false, "download the newest virus database, unpackers and boot block database")
 	force := flag.Bool("force", false, "with -update: download even when nothing changed")
 	checkLib := flag.String("check-library", "", "") // internal: load one library from -libs, print its version
 	flag.Usage = usage
@@ -134,22 +142,7 @@ func main() {
 	}
 	switch {
 	case *showVersion:
-		fmt.Printf("AmiScan %s\n%s in %s\n", version, s.IDString, dir)
-		if dec != nil {
-			fmt.Println(dec.IDString)
-		} else {
-			fmt.Println(xfdNote)
-		}
-		if _, err := os.Stat(filepath.Join(dir, "xpkmaster.library")); err == nil {
-			fmt.Println("xpkmaster.library installed: XPK files are unpacked")
-		} else {
-			fmt.Println(`xpkmaster.library not installed ("amiscan -update" fetches it)`)
-		}
-		if bdb != nil {
-			fmt.Printf("Amiga Bootblock Reader database: %d boot blocks\n", bdb.Size())
-		} else {
-			fmt.Println(`boot block database not installed ("amiscan -update" fetches it)`)
-		}
+		showVersions(m, dir, s, dec, bdb)
 		return
 	case *list:
 		os.Exit(listViruses(s))
@@ -323,6 +316,46 @@ func libraryVersion(name string) func(dir string) (string, error) {
 			return "", fmt.Errorf("no version in %q", out)
 		}
 		return v, nil
+	}
+}
+
+// showVersions lists the parts AmiScan works with and what each does.
+func showVersions(m *amiga.Machine, dir string, s *xvs.Scanner, dec *xfd.Decruncher, bdb *bootdb.DB) {
+	missing := "not installed"
+	ver := func(id string) string {
+		if v := idVersionRe.FindString(id); v != "" {
+			return v
+		}
+		return id
+	}
+	fmt.Printf("AmiScan %s\n\nParts in %s:\n", version, dir)
+	line := func(name, state, what string) { fmt.Printf("  %-20s %-22s %s\n", name, state, what) }
+	line("xvs.library", ver(s.IDString), "the virus database")
+	xfdState, xpkState := missing, missing
+	if dec != nil {
+		xfdState = ver(dec.IDString)
+	}
+	line("xfdmaster.library", xfdState, "unpacks packed programs")
+	if _, err := os.Stat(filepath.Join(dir, "xpkmaster.library")); err == nil {
+		lib, err := m.LoadLibrary(filepath.Join(dir, "xpkmaster.library"))
+		if err == nil {
+			lib, err = m.OpenLibrary(lib, 0)
+		}
+		if err == nil && lib != 0 {
+			xpkState = ver(m.Latin1String(m.Read32(lib + amiga.Library_lib_IdString)))
+		} else {
+			xpkState = "installed but does not start"
+		}
+	}
+	line("xpkmaster.library", xpkState, "unpacks XPK files")
+	if bdb != nil {
+		brain, search := bdb.Counts()
+		line("boot block database", fmt.Sprintf("%d boot blocks", brain), fmt.Sprintf("names boot blocks (and %d byte patterns)", search))
+	} else {
+		line("boot block database", missing, "names boot blocks, knows more boot viruses")
+	}
+	if dec == nil || bdb == nil || xpkState == missing {
+		fmt.Println("\nAmiScan checks less without the missing parts; \"amiscan -update\" fetches them.")
 	}
 }
 
