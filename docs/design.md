@@ -4,10 +4,14 @@
 
 - `make` builds the static binary; `make test` runs vet and tests. The xvs tests
   need `AMISCAN_LIBS=<folder with xvs.library>`; without it they skip.
-- Status 0.1b1 (2026-10-12): scanning files, disks and archives works; xvs.library
-  33.49 loads, self-tests, lists its 379/15/382/107 viruses, tells programs,
-  data and boot block kinds apart. **Not yet seen to catch a real virus**: no
-  infected sample found yet. That is the first thing to do.
+- Status 0.1b1 (2026-10-12): scanning files, disks and archives works. xvs.library
+  33.49 loads, self-tests, and **catches real viruses**: the archive.org collection
+  `amiga_virus_collection_research` (1,392 files, 21 MB .7z) gives 1,502 viruses
+  (665 link, 326 file, 258 data, 253 boot) in 1.6 s, and the verdict and name of
+  every one of its 1,392 files is identical to xvs.library run in vamos (an
+  independent emulator). Tests: `AMISCAN_LIBS=... AMISCAN_SAMPLES=<unpacked
+  collection> make test`. Download the collection again when needed; never commit
+  samples.
 - Next: see "Later" below.
 
 ## How it works
@@ -53,9 +57,8 @@ downloads it. Musashi is MIT-style. See NOTICES.md.
 
 ## Later
 
-1. **A real positive**: find infected samples (VHT, the user's old disks) and add
-   a test that names the virus. Without that, a wrong flag in the boot or file
-   check would go unnoticed.
+1. Many "clean" programs in the virus collection are its clean reference copies
+   (`*_UN`, `*_ORG`, `*_CLEAN`); the rest are probably crunched: see 3.
 2. **VirusZ_III.Bootblocks** (VHT, 1,981 harmless boot blocks by name): read its
    brain format and name known harmless boot blocks instead of "unknown".
 3. **Crunched programs**: run xfdmaster.library (Aminet util/pack/xfdmaster.lha,

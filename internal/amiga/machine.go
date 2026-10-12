@@ -314,3 +314,14 @@ func (m *Machine) Bytes(a, n uint32) []byte {
 	}
 	return m.CPU.RAM[a : a+n]
 }
+
+// Latin1String reads a NUL-terminated ISO-8859-1 string (the Amiga's
+// character set) and returns it as UTF-8.
+func (m *Machine) Latin1String(a uint32) string {
+	raw := m.CString(a)
+	r := make([]rune, len(raw))
+	for i := 0; i < len(raw); i++ {
+		r[i] = rune(raw[i])
+	}
+	return string(r)
+}

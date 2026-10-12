@@ -83,3 +83,46 @@ func TestManyChecksDoNotLeak(t *testing.T) {
 		}
 	}
 }
+
+// TestKnownViruses needs the Amiga virus research collection
+// (archive.org item amiga_virus_collection_research, unpacked) in
+// AMISCAN_SAMPLES. Never commit samples to this repository.
+func TestKnownViruses(t *testing.T) {
+	s := open(t)
+	dir := os.Getenv("AMISCAN_SAMPLES")
+	if dir == "" {
+		t.Skip("AMISCAN_SAMPLES not set")
+	}
+	for _, c := range []struct {
+		file, virus string
+		boot        bool
+	}{
+		{"VIRUSCOLLECTIE/U/ULOG.X", "BossNuke 1.5ß", false},
+		{"VIRUSCOLLECTIE/B/BRETHAWN.VIR", "Bret Hawnes", false},
+		{"VIRUSCOLLECTIE/O/ORB95", "ORB 95", false},
+		{"VIRUSCOLLECTIE/BOOTBLOCKS/16BITCREW", "16 Bit Crew", true},
+	} {
+		data, err := os.ReadFile(filepath.Join(dir, c.file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var name string
+		var infected bool
+		if c.boot {
+			r, err := s.CheckBootblock(data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			name, infected = r.Name, r.Infected()
+		} else {
+			r, err := s.CheckFile(data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			name, infected = r.Name, r.Infected()
+		}
+		if !infected || name != c.virus {
+			t.Errorf("%s: infected %v name %q, want %q", c.file, infected, name, c.virus)
+		}
+	}
+}

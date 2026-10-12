@@ -48,6 +48,13 @@ func (w *walker) walk(name string, data []byte, depth int) (err error) {
 	if err := w.fn(Item{Path: name, Data: data}); err != nil {
 		return err
 	}
+	// a boot block saved as a file (a virus collection's, or a .bb backup)
+	if len(data) == 1024 && bytes.HasPrefix(data, []byte("DOS")) {
+		if err := w.fn(Item{Path: name + " (as boot block)", Data: data, Boot: true}); err != nil {
+			return err
+		}
+		return nil
+	}
 	head := data[:min(len(data), headSize)]
 	ext := strings.ToLower(strings.TrimPrefix(path.Ext(name), "."))
 	f := detect(head, int64(len(data)), ext)

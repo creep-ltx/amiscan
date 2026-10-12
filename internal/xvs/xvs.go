@@ -114,7 +114,7 @@ func (s *Scanner) VirusList(kind uint32) ([]string, error) {
 	}
 	var names []string
 	for n := s.m.Read32(l); n != 0 && s.m.Read32(n) != 0; n = s.m.Read32(n) {
-		names = append(names, s.m.CString(s.m.Read32(n+amiga.Node_ln_Name)))
+		names = append(names, s.m.Latin1String(s.m.Read32(n+amiga.Node_ln_Name)))
 	}
 	_, err = s.call(lvoFreeVirusList, map[string]uint32{"a1": l}, 50_000_000)
 	return names, err
@@ -151,7 +151,7 @@ func (s *Scanner) CheckFile(data []byte) (FileResult, error) {
 	if _, err := s.call(lvoCheckFile, map[string]uint32{"a0": fi}, budgetFor(len(data))); err != nil {
 		return FileResult{}, fmt.Errorf("xvsCheckFile: %w", err)
 	}
-	return FileResult{Type: s.m.Read8(fi + 12), Name: s.m.CString(s.m.Read32(fi + 8))}, nil
+	return FileResult{Type: s.m.Read8(fi + 12), Name: s.m.Latin1String(s.m.Read32(fi + 8))}, nil
 }
 
 // RepairFile asks xvs.library to remove a link virus; it returns the fixed
@@ -221,7 +221,7 @@ func (s *Scanner) CheckBootblock(bb []byte) (BootResult, error) {
 	}
 	return BootResult{
 		Type:       s.m.Read8(bi + 8),
-		Name:       s.m.CString(s.m.Read32(bi + 4)),
+		Name:       s.m.Latin1String(s.m.Read32(bi + 4)),
 		DosType:    s.m.Read8(bi + 9),
 		ChecksumOK: s.m.Read8(bi+10) != 0,
 	}, nil
