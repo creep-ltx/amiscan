@@ -79,6 +79,24 @@ func (x *Decruncher) call(lvo uint32, regs map[string]uint32, budget int64) (uin
 // ErrLocked is returned for a file packed with a password or key.
 var ErrLocked = errors.New("packed with a password or key")
 
+// Error is a decruncher's failure, with xfdmaster's error code.
+type Error struct {
+	Code uint16
+	Text string
+}
+
+func (e *Error) Error() string { return e.Text }
+
+// Corrupt reports whether the packed data itself is broken, as opposed to
+// something missing here (memory, a library, a better CPU).
+func (e *Error) Corrupt() bool {
+	switch e.Code {
+	case 0x0007, 0x0008: // bad hunk structure, corrupted data
+		return true
+	}
+	return e.Code >= 0x1000 && e.Code < 0x2000 // hunk structure errors: truncated, undefined hunk...
+}
+
 // Decrunch unpacks data if a decruncher knows it. packer is "" and out is
 // nil when the data is not crunched.
 func (x *Decruncher) Decrunch(data []byte) (out []byte, packer string, err error) {
@@ -123,10 +141,11 @@ func (x *Decruncher) Decrunch(data []byte) (out []byte, packer string, err error
 	if ok == 0 {
 		code := m.Read16(bi + biError)
 		text, _ := x.call(lvoGetErrorText, map[string]uint32{"d0": uint32(code)}, 1_000_000)
-		if msg := m.Latin1String(text); msg != "" {
-			return nil, packer, errors.New(strings.ToLower(msg[:1]) + msg[1:])
+		msg := m.Latin1String(text)
+		if msg == "" {
+			msg = fmt.Sprintf("xfd error %d", code)
 		}
-		return nil, packer, fmt.Errorf("xfd error %d", code)
+		return nil, packer, &Error{Code: code, Text: strings.ToLower(msg[:1]) + msg[1:]}
 	}
 	target, n := m.Read32(bi+biTargetBuffer), m.Read32(bi+biTargetBufSaveLen)
 	defer m.Free(target)

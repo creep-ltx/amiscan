@@ -105,7 +105,8 @@ func (w *walker) walk(name string, data []byte, depth int, damaged string) (err 
 				w.warn(name+"/"+m.name, rerr, true)
 				continue
 			}
-			damaged = rerr.Error() // check the part that unpacked
+			// check the part that unpacked; the name is in the path already
+			damaged = strings.TrimSuffix(rerr.Error(), " in "+m.name)
 		}
 		if int64(len(b)) > limit {
 			w.warn(name+"/"+m.name, fmt.Errorf("bigger than %d MB: not checked", limit>>20), false)

@@ -4,11 +4,9 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -20,7 +18,6 @@ import (
 
 	"github.com/creep-ltx/amiscan/internal/amiga"
 	"github.com/creep-ltx/amiscan/internal/bootdb"
-	"github.com/creep-ltx/amiscan/internal/diz"
 	"github.com/creep-ltx/amiscan/internal/update"
 	"github.com/creep-ltx/amiscan/internal/xfd"
 	"github.com/creep-ltx/amiscan/internal/xvs"
@@ -30,24 +27,30 @@ const version = "0.1b1"
 
 const xvsURL = "https://www.vht-dk.dk/amiga/xvs/xvs.htm"
 
-// Exit codes.
-const (
-	exitClean   = 0
-	exitVirus   = 1
-	exitTrouble = 2
-)
-
 func usage() {
 	fmt.Fprintf(os.Stderr, `AmiScan %s - checks Amiga files, disks and archives for Amiga viruses
 
 usage: amiscan [options] FILE|FOLDER ...
-       amiscan -update        fetch the newest xvs.library (the virus database)
+       amiscan -update        fetch the newest virus database and unpackers
        amiscan -list          show every virus xvs.library knows
+       amiscan -version       show what is installed
 
 Disk images (ADF, ADZ, DMS, HDF) and archives (LhA, LZX, Zip, 7z, RAR, ...) are
-opened, also inside each other, and every file and boot block in them is checked.
+opened by their contents, also inside each other; packed programs (PowerPacker,
+Imploder, XPK, ...) are unpacked; every file and boot block is checked.
 
-Exit status: 0 nothing found, 1 virus found, 2 something could not be checked.
+Output (one of):
+  (default)  a report at the end: viruses, damaged files and files not checked,
+             each with where it is and why
+  -bbs       one line per file, for BBS software:  CODE FILE MESSAGE
+               0 FILE is clean
+               1 FILE is infected with VIRUS[, VIRUS...]
+               2 FILE is corrupted: WHERE: WHY
+               3 FILE could not be checked: WHERE: WHY
+  -json      one JSON object per finding, then a summary object
+
+Exit status: the worst code found (0 clean, 1 virus, 2 corrupted, 3 not
+checked). 3 also when AmiScan itself cannot run.
 
 options:
 `, version)
@@ -61,8 +64,11 @@ AmiScan needs xvs.library, the virus database, from the Virus Help Team
 
 func main() {
 	libs := flag.String("libs", "", "folder with xvs.library")
-	jsonOut := flag.Bool("json", false, "one JSON object per line, for programs (BBX)")
-	verbose := flag.Bool("v", false, "list every file checked, not only problems")
+	jsonOut := flag.Bool("json", false, "one JSON object per finding, for programs")
+	bbsOut := flag.Bool("bbs", false, "one line per file: code (0 clean, 1 virus, 2 corrupted, 3 not checked), file, message")
+	showList := flag.String("show", "virus,damaged,unchecked", "what the report lists: virus, damaged, unchecked, clean, all or none")
+	verbose := flag.Bool("v", false, "list the clean files too (same as -show all)")
+	quiet := flag.Bool("q", false, "only the summary line (same as -show none)")
 	list := flag.Bool("list", false, "list the viruses xvs.library knows")
 	trace := flag.Bool("trace", false, "log every Amiga OS call (debugging)")
 	showVersion := flag.Bool("version", false, "show the versions")
@@ -88,13 +94,13 @@ func main() {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "amiscan:", err)
 		fmt.Fprintln(os.Stderr, `Run "amiscan -update" to download it.`)
-		os.Exit(exitTrouble)
+		os.Exit(codeUnchecked)
 	}
 	m := amiga.New(dir)
 	s, err := xvs.Open(m)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "amiscan:", err)
-		os.Exit(exitTrouble)
+		os.Exit(codeUnchecked)
 	}
 	// the emulated Amiga's own notes are for debugging, not for users
 	if *trace {
@@ -104,7 +110,7 @@ func main() {
 	}
 	if ok, err := s.SelfTest(); !ok || err != nil {
 		fmt.Fprintf(os.Stderr, "amiscan: xvs.library failed its self test (%v); download it again from %s\n", err, xvsURL)
-		os.Exit(exitTrouble)
+		os.Exit(codeUnchecked)
 	}
 	// xfdmaster.library is optional: without it packed programs are checked
 	// as they are
@@ -113,7 +119,7 @@ func main() {
 	if _, err := os.Stat(filepath.Join(dir, "xfdmaster.library")); err == nil {
 		if dec, err = xfd.Open(m); err != nil {
 			fmt.Fprintln(os.Stderr, "amiscan: xfdmaster.library:", err)
-			os.Exit(exitTrouble)
+			os.Exit(codeUnchecked)
 		}
 	} else {
 		xfdNote = `xfdmaster.library not installed: packed programs are not unpacked ("amiscan -update" fetches it)`
@@ -123,7 +129,7 @@ func main() {
 	if _, err := os.Stat(filepath.Join(dir, bootdb.BrainFile)); err == nil {
 		if bdb, err = bootdb.Load(dir); err != nil {
 			fmt.Fprintln(os.Stderr, "amiscan: boot block database:", err)
-			os.Exit(exitTrouble)
+			os.Exit(codeUnchecked)
 		}
 	}
 	switch {
@@ -150,20 +156,42 @@ func main() {
 	}
 	if flag.NArg() == 0 {
 		usage()
-		os.Exit(exitTrouble)
+		os.Exit(codeUnchecked)
 	}
-	r := &reporter{s: s, dec: dec, bdb: bdb, json: *jsonOut, verbose: *verbose, start: time.Now()}
-	if !r.json {
+	show, err := parseShow(*showList)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "amiscan:", err)
+		os.Exit(codeUnchecked)
+	}
+	if *verbose {
+		show, _ = parseShow("all")
+	}
+	if *quiet {
+		show = map[string]bool{}
+	}
+	mode := outText
+	switch {
+	case *jsonOut && *bbsOut:
+		fmt.Fprintln(os.Stderr, "amiscan: -json and -bbs cannot be used together")
+		os.Exit(codeUnchecked)
+	case *jsonOut:
+		mode = outJSON
+	case *bbsOut:
+		mode = outBBS
+	}
+	r := newReporter(mode, show)
+	sc := &scanner{s: s, dec: dec, bdb: bdb, r: r}
+	if mode == outText {
 		fmt.Printf("AmiScan %s with %s\n", version, s.IDString)
-		if xfdNote != "" {
-			fmt.Fprintln(os.Stderr, "amiscan: "+xfdNote)
-		}
-		if t := update.LastChecked(dir, update.XVS.Name); !t.IsZero() && time.Since(t) > 30*24*time.Hour {
-			fmt.Fprintf(os.Stderr, "amiscan: no update check for %d days; run \"amiscan -update\"\n", int(time.Since(t).Hours()/24))
-		}
+	}
+	if xfdNote != "" && mode != outJSON {
+		fmt.Fprintln(os.Stderr, "amiscan: "+xfdNote)
+	}
+	if t := update.LastChecked(dir, update.XVS.Name); !t.IsZero() && time.Since(t) > 30*24*time.Hour && mode != outJSON {
+		fmt.Fprintf(os.Stderr, "amiscan: no update check for %d days; run \"amiscan -update\"\n", int(time.Since(t).Hours()/24))
 	}
 	for _, arg := range flag.Args() {
-		r.scanPath(arg)
+		sc.scanPath(arg)
 	}
 	code := r.finish()
 	pprof.StopCPUProfile()
@@ -183,7 +211,7 @@ func runUpdate(flagDir string, force bool) int {
 	}
 	if err := update.Writable(dir); err != nil {
 		fmt.Fprintf(os.Stderr, "amiscan: cannot write to %s (%v); name another folder with -libs\n", dir, err)
-		return exitTrouble
+		return codeUnchecked
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -194,7 +222,7 @@ func runUpdate(flagDir string, force bool) int {
 	update.BootBrain.Version = bootDBVersion(false)
 	update.BootSearch.Version = bootDBVersion(true)
 	fmt.Printf("Updating %s\n", dir)
-	code := exitClean
+	code := codePass
 	for _, src := range []*update.Source{update.XVS, update.XFD, update.XPK, update.BootBrain, update.BootSearch} {
 		results, err := u.Update(ctx, src, force)
 		for _, r := range results {
@@ -202,7 +230,7 @@ func runUpdate(flagDir string, force bool) int {
 		}
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "amiscan:", err)
-			code = exitTrouble
+			code = codeUnchecked
 		}
 	}
 	return code
@@ -238,22 +266,22 @@ func checkLibrary(dir, name string) int {
 		s, err := xvs.Open(m)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
-			return exitTrouble
+			return codeUnchecked
 		}
 		if ok, err := s.SelfTest(); !ok || err != nil {
 			fmt.Fprintln(os.Stderr, "self test failed", err)
-			return exitTrouble
+			return codeUnchecked
 		}
 		id = s.IDString
 	case "xfdmaster.library":
 		d, err := xfd.Open(m)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
-			return exitTrouble
+			return codeUnchecked
 		}
 		if out, _, _ := d.Decrunch(make([]byte, 64)); out != nil {
 			fmt.Fprintln(os.Stderr, "xfdmaster unpacks zeros: broken")
-			return exitTrouble
+			return codeUnchecked
 		}
 		id = d.IDString
 	case "xpkmaster.library":
@@ -263,15 +291,15 @@ func checkLibrary(dir, name string) int {
 		}
 		if err != nil || lib == 0 {
 			fmt.Fprintln(os.Stderr, "xpkmaster.library does not start", err)
-			return exitTrouble
+			return codeUnchecked
 		}
 		id = m.Latin1String(m.Read32(lib + amiga.Library_lib_IdString))
 	default:
 		fmt.Fprintln(os.Stderr, "unknown library", name)
-		return exitTrouble
+		return codeUnchecked
 	}
 	fmt.Println(id)
-	return exitClean
+	return codePass
 }
 
 var idVersionRe = regexp.MustCompile(`\d+\.\d+ \([^)]*\)`)
@@ -296,6 +324,31 @@ func libraryVersion(name string) func(dir string) (string, error) {
 		}
 		return v, nil
 	}
+}
+
+// parseShow reads the -show list.
+func parseShow(list string) (map[string]bool, error) {
+	show := map[string]bool{}
+	for _, w := range strings.Split(list, ",") {
+		switch w = strings.TrimSpace(strings.ToLower(w)); w {
+		case "", "none":
+		case "all":
+			for _, k := range []string{resVirus, resDamaged, resUnchecked, resClean} {
+				show[k] = true
+			}
+		case "virus", "viruses", "infected":
+			show[resVirus] = true
+		case "damaged", "corrupted", "corrupt":
+			show[resDamaged] = true
+		case "unchecked", "skipped", "notchecked":
+			show[resUnchecked] = true
+		case "clean", "ok":
+			show[resClean] = true
+		default:
+			return nil, fmt.Errorf("-show: unknown kind %q (virus, damaged, unchecked, clean, all, none)", w)
+		}
+	}
+	return show, nil
 }
 
 // defaultLibs are the folders searched for xvs.library, in order.
@@ -342,303 +395,12 @@ func listViruses(s *xvs.Scanner) int {
 		names, err := s.VirusList(k.kind)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "amiscan:", err)
-			return exitTrouble
+			return codeUnchecked
 		}
 		fmt.Printf("%s (%d):\n", k.name, len(names))
 		for _, n := range names {
 			fmt.Println("  " + n)
 		}
 	}
-	return exitClean
-}
-
-// ---- scanning and reporting
-
-type finding struct {
-	Path   string `json:"path"`
-	Kind   string `json:"kind"`             // "file" or "boot"
-	Result string `json:"result"`           // "clean", "virus", "damaged", "skipped", "error"
-	Virus  string `json:"virus,omitempty"`  // virus name
-	Type   string `json:"type,omitempty"`   // "boot virus", "link virus", ...; for clean items what it is
-	Detail string `json:"detail,omitempty"` // why skipped or the error
-	// FoundBy is "xvs" or "bootblock database" for a virus; for a boot
-	// block the database names, Type holds its name and class.
-	FoundBy string `json:"found_by,omitempty"`
-	top     string // the file on disk it is in
-	// Damaged: the archive could not give the whole file (why); the part
-	// that unpacked was checked, which is what LhA itself would write out.
-	Damaged string `json:"damaged,omitempty"`
-}
-
-type reporter struct {
-	s       *xvs.Scanner
-	dec     *xfd.Decruncher // nil without xfdmaster.library
-	bdb     *bootdb.DB      // nil without the boot block database
-	json    bool
-	verbose bool
-	start   time.Time
-
-	files, boots, unpacked, viruses, skipped, errs, damaged int
-	found                                                   []finding // the viruses, for the list at the end
-	top                                                     string    // the file on disk being checked
-}
-
-// maxLayers is how many times a file packed inside a packed file is unpacked.
-const maxLayers = 5
-
-var limits = diz.Limits{Depth: 8, Total: 8 << 30, File: xvs.MaxFileSize}
-
-const maxTopFile = 8 << 30 // a hard disk image; its files are checked one by one
-
-func (r *reporter) scanPath(arg string) {
-	err := filepath.WalkDir(arg, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			r.report(finding{Path: p, Kind: "file", Result: "error", Detail: err.Error()})
-			return nil
-		}
-		if d.IsDir() || !d.Type().IsRegular() {
-			return nil
-		}
-		if info, err := d.Info(); err == nil && info.Size() > maxTopFile {
-			r.report(finding{Path: p, Kind: "file", Result: "skipped", Detail: "bigger than 8 GB"})
-			return nil
-		}
-		data, err := os.ReadFile(p)
-		if err != nil {
-			r.report(finding{Path: p, Kind: "file", Result: "error", Detail: err.Error()})
-			return nil
-		}
-		r.top = p
-		diz.Walk(p, data, limits, r.check, func(path string, err error, damaged bool) {
-			if damaged {
-				r.report(finding{Path: path, Kind: "file", Result: "damaged", Detail: err.Error()})
-				return
-			}
-			r.report(finding{Path: path, Kind: "file", Result: "skipped", Detail: err.Error()})
-		})
-		return nil
-	})
-	if err != nil {
-		r.report(finding{Path: arg, Kind: "file", Result: "error", Detail: err.Error()})
-	}
-}
-
-var fileTypes = map[uint8]string{
-	xvs.FileEmpty: "empty file", xvs.FileData: "data file", xvs.FileExe: "program",
-	xvs.FileDataVirus: "data virus", xvs.FileVirus: "file virus", xvs.FileLinkVirus: "link virus",
-}
-
-func (r *reporter) check(it diz.Item) error {
-	if it.Boot {
-		res, err := r.s.CheckBootblock(it.Data)
-		f := finding{Path: it.Path, Kind: "boot"}
-		var known *bootdb.Entry
-		if r.bdb != nil {
-			known = r.bdb.Match(it.Data)
-		}
-		switch {
-		case err != nil:
-			f.Result, f.Detail = "error", err.Error()
-		case res.Infected():
-			f.Result, f.Virus, f.Type, f.FoundBy = "virus", res.Name, "boot virus", "xvs"
-		case known != nil && known.IsVirus():
-			// xvs does not know it; the database does
-			f.Result, f.Virus, f.Type, f.FoundBy = "virus", known.Name, "boot virus", "bootblock database"
-		case known != nil:
-			f.Result, f.Type = "clean", known.Name+" ("+known.ClassName()+")"
-		default:
-			f.Result, f.Type = "clean", res.Name
-		}
-		r.report(f)
-		return nil
-	}
-	f := finding{Path: it.Path, Kind: "file", Damaged: it.Damaged}
-	if len(it.Data) > xvs.MaxFileSize {
-		f.Result, f.Detail = "skipped", fmt.Sprintf("bigger than %d MB, too big for the emulated Amiga", xvs.MaxFileSize>>20)
-		r.report(f)
-		return nil
-	}
-	res, err := r.s.CheckFile(it.Data)
-	switch {
-	case err != nil:
-		f.Result, f.Detail = "error", err.Error()
-	case res.Infected():
-		f.Result, f.Virus, f.Type = "virus", res.Name, fileTypes[res.Type]
-	default:
-		f.Result, f.Type = "clean", fileTypes[res.Type]
-	}
-	r.report(f)
-	r.unpack(it, 0, f.Result == "virus")
-	return nil
-}
-
-// unpack decrunches a packed file with xfdmaster and checks what is inside.
-// A file already found infected is not reported again when it will not
-// unpack: a link virus usually breaks the packed file's structure.
-func (r *reporter) unpack(it diz.Item, layer int, infected bool) {
-	if r.dec == nil || layer >= maxLayers {
-		return
-	}
-	out, packer, err := r.dec.Decrunch(it.Data)
-	if err != nil && infected {
-		return
-	}
-	inside := it.Path + " (packed contents)"
-	if err != nil && it.Damaged != "" {
-		// a packed file cut short by a damaged archive cannot unpack; it is
-		// already counted as damaged and checked as far as it goes
-		return
-	}
-	switch {
-	case errors.Is(err, xfd.ErrLocked):
-		r.report(finding{Path: inside, Kind: "file", Result: "skipped", Detail: packer + " needs a password to unpack"})
-		return
-	case err != nil:
-		r.report(finding{Path: inside, Kind: "file", Result: "skipped", Detail: packer + " will not unpack: " + err.Error()})
-		return
-	case out == nil:
-		return
-	}
-	r.unpacked++
-	inner := diz.Item{Path: it.Path + " (unpacked " + packer + ")", Data: out, Damaged: it.Damaged}
-	f := finding{Path: inner.Path, Kind: "file"}
-	res, err := r.s.CheckFile(out)
-	switch {
-	case err != nil:
-		f.Result, f.Detail = "error", err.Error()
-	case res.Infected():
-		f.Result, f.Virus, f.Type = "virus", res.Name, fileTypes[res.Type]
-	default:
-		f.Result, f.Type = "clean", fileTypes[res.Type]
-	}
-	r.report(f)
-	r.unpack(inner, layer+1, f.Result == "virus")
-}
-
-func (r *reporter) report(f finding) {
-	switch {
-	case f.Kind == "boot":
-		r.boots++
-	case f.Result != "skipped" && f.Result != "damaged":
-		r.files++
-	}
-	if f.Damaged != "" || f.Result == "damaged" {
-		r.damaged++
-	}
-	switch f.Result {
-	case "virus":
-		r.viruses++
-		f.top = r.top
-		r.found = append(r.found, f)
-	case "skipped":
-		r.skipped++
-	case "error":
-		r.errs++
-	}
-	if r.json {
-		b, _ := json.Marshal(f)
-		fmt.Println(string(b))
-		return
-	}
-	switch f.Result {
-	case "virus":
-		by := ""
-		if f.FoundBy == "bootblock database" {
-			by = ", found by the boot block database"
-		}
-		fmt.Printf("%s: VIRUS %s (%s%s)\n", f.Path, f.Virus, f.Type, by)
-	case "error":
-		fmt.Printf("%s: ERROR %s\n", f.Path, f.Detail)
-	case "skipped":
-		fmt.Printf("%s: NOT CHECKED, %s\n", f.Path, f.Detail)
-	case "damaged":
-		if r.verbose {
-			fmt.Printf("%s: damaged, %s (the file itself was checked)\n", f.Path, f.Detail)
-		}
-	default:
-		if f.Damaged != "" {
-			if r.verbose {
-				fmt.Printf("%s: ok as far as it unpacks (damaged: %s)\n", f.Path, f.Damaged)
-			}
-			return
-		}
-		if r.verbose {
-			t := f.Type
-			if f.Kind != "boot" {
-				t = strings.ToLower(t)
-			}
-			fmt.Printf("%s: ok (%s)\n", f.Path, t)
-		}
-	}
-}
-
-// listViruses repeats every virus at the end, grouped by the file on disk
-// that holds it (the upload to delete), with where inside it was found.
-func (r *reporter) listViruses() {
-	if len(r.found) == 0 {
-		return
-	}
-	fmt.Printf("\nViruses found:\n")
-	last := ""
-	for _, f := range r.found {
-		if f.top != last {
-			fmt.Printf("\n  %s\n", f.top)
-			last = f.top
-		}
-		inside := strings.TrimPrefix(strings.TrimPrefix(f.Path, f.top), "/")
-		if inside == "" {
-			inside = "(the file itself)"
-		}
-		fmt.Printf("      %-40s %s (%s)\n", inside, f.Virus, f.Type)
-	}
-	fmt.Println()
-}
-
-func (r *reporter) finish() int {
-	took := time.Since(r.start).Round(time.Millisecond)
-	code := exitClean
-	if r.errs > 0 || r.skipped > 0 {
-		code = exitTrouble
-	}
-	if r.viruses > 0 {
-		code = exitVirus
-	}
-	if r.json {
-		b, _ := json.Marshal(map[string]any{
-			"summary": true, "files": r.files, "bootblocks": r.boots, "unpacked": r.unpacked, "viruses": r.viruses,
-			"skipped": r.skipped, "errors": r.errs, "damaged": r.damaged, "seconds": took.Seconds(), "exit": code,
-		})
-		fmt.Println(string(b))
-		return code
-	}
-	r.listViruses()
-	verdict := "no viruses found"
-	if r.viruses == 1 {
-		verdict = "1 VIRUS FOUND"
-	} else if r.viruses > 1 {
-		verdict = fmt.Sprintf("%d VIRUSES FOUND", r.viruses)
-	}
-	plural := func(n int, one, many string) string {
-		if n == 1 {
-			return "1 " + one
-		}
-		return fmt.Sprintf("%d %s", n, many)
-	}
-	unpacked := ""
-	if r.unpacked > 0 {
-		unpacked = fmt.Sprintf(" (%d of them unpacked)", r.unpacked)
-	}
-	fmt.Printf("Checked %s%s and %s in %s: %s", plural(r.files, "file", "files"), unpacked, plural(r.boots, "boot block", "boot blocks"), took, verdict)
-	if r.skipped+r.errs > 0 {
-		fmt.Printf(", %d not checked", r.skipped+r.errs)
-	}
-	fmt.Println(".")
-	if r.damaged > 0 {
-		fmt.Printf("%s damaged in their archives: checked as far as they unpack", plural(r.damaged, "file was", "files were"))
-		if !r.verbose {
-			fmt.Print(" (-v lists them)")
-		}
-		fmt.Println(".")
-	}
-	return code
+	return codePass
 }

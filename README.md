@@ -53,19 +53,54 @@ folders, first one wins:
 
 ## Using it
 
-    amiscan Downloads/                 check a folder
-    amiscan -v game.adf                list every file checked
+    amiscan Downloads/                 check a folder; report at the end
+    amiscan -bbs upload.lha            one line per file, for BBS software
+    amiscan -json upload.lha           machine-readable, one object per finding
+    amiscan -show virus Downloads/     list only the viruses
+    amiscan -v game.adf                list the clean files too
+    amiscan -q Downloads/              only the summary line
     amiscan -list                      the viruses xvs.library knows
-    amiscan -version                   which xvs.library is in use
-    amiscan -update                    fetch the newest xvs.library
-    amiscan -json upload.lha           machine-readable, one line per file
+    amiscan -version                   what is installed
+    amiscan -update                    fetch the newest databases and unpackers
 
 It opens ADF, ADZ, DMS and HDF disk images, and LhA, LZX, Zip, 7z, RAR, ARJ,
-ARC, ZOO, CAB, tar and gzip/bzip2/xz archives, also inside each other, and
-checks every file in them and every floppy's boot block.
+ARC, ZOO, CAB, tar and gzip/bzip2/xz archives, also inside each other, by
+their contents (a text called `.lha` is a text). It unpacks packed programs
+(PowerPacker, Imploder, StoneCracker, XPK, ...) and checks every file and
+every floppy's boot block.
 
-Exit status: **0** nothing found, **1** a virus found, **2** something could
-not be checked (named in the output).
+### The report
+
+At the end AmiScan lists, grouped by the file on disk, with where inside
+and why:
+
+- **Viruses**: the virus name and kind.
+- **Damaged**: broken archive members (CRC errors, data cut short) and
+  packed programs whose packed data is broken. They were checked as far
+  as they unpack, which is what LhA itself would write out.
+- **Not checked**: what could not be checked at all, and why (a password,
+  a missing unpacker, a size limit).
+
+`-show` picks which of `virus`, `damaged`, `unchecked`, `clean` are listed
+(default: the first three); `-v` is `-show all`, `-q` is `-show none`.
+
+### For BBS software: -bbs
+
+Like the file checkers Amiga BBSes used, one line per file:
+
+    0 UPLOAD.LHA is clean
+    1 UPLOAD.LHA is infected with Amixhack, BossNuke 1.5ß
+    2 UPLOAD.LHA is corrupted: path/inside: lha: CRC mismatch (and 2 more)
+    3 UPLOAD.LHA could not be checked: the file itself (packed contents): XPK Crypted needs a password to unpack
+
+The first number is the code: **0** pass, **1** virus, **2** corrupted,
+**3** could not check. A file with several problems gets the worst one,
+in that order of badness: virus, corrupted, could not check.
+
+### Exit status
+
+The worst code over all files, the same four numbers. **3** also when
+AmiScan itself cannot run (no xvs.library, a bad option).
 
 ## Limits
 
