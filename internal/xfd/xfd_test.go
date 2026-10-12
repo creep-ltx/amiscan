@@ -66,3 +66,29 @@ func TestDecrunchMatchesOriginal(t *testing.T) {
 		t.Errorf("decrunched file differs from the original")
 	}
 }
+
+// An XPK (NUKE) file through xfdmaster and xpkmaster: AMISCAN_XPK_SAMPLE
+// names one; its header says how long the unpacked file is.
+func TestXPK(t *testing.T) {
+	d := open(t)
+	path := os.Getenv("AMISCAN_XPK_SAMPLE")
+	if path == "" {
+		t.Skip("AMISCAN_XPK_SAMPLE not set")
+	}
+	packed, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(packed[:4]) != "XPKF" {
+		t.Fatal("not an XPK file")
+	}
+	want := int(packed[12])<<24 | int(packed[13])<<16 | int(packed[14])<<8 | int(packed[15])
+	out, packer, err := d.Decrunch(packed)
+	if err != nil || len(out) != want {
+		t.Fatalf("%s: %d bytes, %v; header says %d", packer, len(out), err, want)
+	}
+	if out[0] != 0 || out[1] != 0 || out[2] != 3 || out[3] != 0xf3 {
+		t.Errorf("unpacked file is not an Amiga program")
+	}
+	t.Logf("%s (%s): %d -> %d bytes", packer, packed[8:12], len(packed), len(out))
+}

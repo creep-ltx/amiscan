@@ -15,6 +15,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/creep-ltx/amiscan/internal/m68k"
 )
@@ -27,6 +28,8 @@ const (
 	RAMSize     = fastStart + 0x7f000000 // 2 GB of fast RAM
 	vectorStubs = 0x400                  // 256 x (ILLEGAL, trap) = 1 KiB
 	stopStub    = 0x800                  // a guest call returns here
+	resumeStub  = 0x804                  // a nested guest call returns here
+	rtsStub     = 0x808                  // RTS: ends an OS call that ran guest code
 	heapStart   = 0x1000
 	stackSize   = 0x10000
 	superStack  = lowEnd - stackSize // supervisor stack top
@@ -36,6 +39,7 @@ const (
 
 const (
 	trapStop      = 0xffff
+	trapResume    = 0xfffd
 	trapException = 0xf000 // + vector number
 )
 
@@ -60,11 +64,19 @@ type Machine struct {
 	Log   io.Writer
 	Trace bool
 
-	heap    allocator
-	libs    []*fakeLib // index = trap library number
-	task    uint32
-	files   files
-	stopped bool
+	heap  allocator
+	libs  []*fakeLib      // index = trap library number
+	fake  map[uint32]bool // bases of libraries made in Go
+	conts []func(d0 uint32)
+
+	uniqueID uint32
+
+	// AllocLimit, when not 0, is the largest single AllocMem/AllocVec the
+	// guest gets: a damaged packed file may ask for gigabytes.
+	AllocLimit uint32
+	task       uint32
+	files      files
+	stopped    bool
 }
 
 // New sets up the machine. Only one Machine may exist per process.
@@ -84,14 +96,28 @@ func New(libsDir string) *Machine {
 	}
 	c.Write16(stopStub, 0x4afc)
 	c.Write16(stopStub+2, trapStop)
+	c.Write16(resumeStub, 0x4afc)
+	c.Write16(resumeStub+2, trapResume)
+	c.Write16(rtsStub, 0x4e75)
 	m.libs = append(m.libs, nil) // index 0 unused
+	m.fake = map[uint32]bool{}
 	m.setupExec()
 	m.setupDos()
 	// Amiga libraries look for these; every call to them returns 0.
 	m.AddFakeDevice("trackdisk.device")
-	m.AddFakeLibrary("intuition.library", 40)
-	m.AddFakeLibrary("utility.library", 40)
+	in := m.AddFakeLibrary("intuition.library", 40)
+	in.funcs["CurrentTime"] = func() {
+		now := time.Now()
+		secs := uint32(now.Unix() - time.Date(1978, 1, 1, 0, 0, 0, 0, time.UTC).Unix())
+		m.w32(m.CPU.A(0), secs)
+		m.w32(m.CPU.A(1), uint32(now.Nanosecond()/1000))
+	}
+	m.setupUtility()
 	m.AddFakeLibrary("graphics.library", 40)
+	// xpkmaster wants these for its password window, which never opens here
+	m.AddFakeLibrary("gadtools.library", 40)
+	m.AddFakeLibrary("asl.library", 40)
+	m.AddFakeLibrary("locale.library", 40)
 	return m
 }
 
@@ -148,6 +174,15 @@ func (m *Machine) trap(pc uint32, id uint16) (handled bool) {
 	case id == trapStop:
 		c.Stop()
 		return true
+	case id == trapResume:
+		if len(m.conts) == 0 {
+			c.Fail(fmt.Errorf("stray return to the resume stub"))
+			return true
+		}
+		k := m.conts[len(m.conts)-1]
+		m.conts = m.conts[:len(m.conts)-1]
+		k(c.D(0))
+		return true
 	case id >= trapException && id < trapException+256:
 		v := uint32(id - trapException)
 		// the stacked PC of the faulting instruction (format 0 frame: SR, PC)
@@ -196,11 +231,65 @@ func (m *Machine) Call(addr uint32, regs map[string]uint32, maxCycles int64) (ui
 	}
 	c.SetSP(userStack - 4)
 	c.Write32(userStack-4, stopStub)
+	m.conts = m.conts[:0]
 	c.SetPC(addr)
 	if err := c.Run(maxCycles); err != nil {
 		return 0, err
 	}
 	return c.D(0), nil
+}
+
+// ---- guest code called from inside an OS call
+//
+// Musashi cannot be re-entered from a trap, so an OS call that must run
+// guest code (a library's init and Open functions) does it in steps:
+// guestCall points the CPU at the function with the resume stub as its
+// return address, and when it returns the continuation runs; the last
+// step calls osReturn, which ends the OS call as its RTS would.
+
+type savedRegs struct{ d, a [8]uint32 }
+
+func (m *Machine) saveRegs() savedRegs {
+	var s savedRegs
+	for i := 0; i < 8; i++ {
+		s.d[i], s.a[i] = m.CPU.D(i), m.CPU.A(i)
+	}
+	return s
+}
+
+// guestCall runs fn with regs set; then calls then with its D0.
+func (m *Machine) guestCall(fn uint32, regs map[string]uint32, then func(d0 uint32)) {
+	c := m.CPU
+	for k, v := range regs {
+		n := int(k[1] - '0')
+		if k[0] == 'd' {
+			c.SetD(n, v)
+		} else {
+			c.SetA(n, v)
+		}
+	}
+	sp := c.SP() - 4
+	c.Write32(sp, resumeStub)
+	c.SetSP(sp)
+	m.conts = append(m.conts, then)
+	c.SetPC(fn)
+}
+
+// osReturn finishes an OS call that ran guest code: the caller's registers
+// back (the Amiga ABI lets an OS call change only D0, D1, A0 and A1), D0
+// set, and an RTS to the caller.
+func (m *Machine) osReturn(saved savedRegs, d0 uint32) {
+	c := m.CPU
+	sp := c.SP()
+	for i := 2; i < 8; i++ {
+		c.SetD(i, saved.d[i])
+	}
+	for i := 2; i < 7; i++ {
+		c.SetA(i, saved.a[i])
+	}
+	c.SetSP(sp)
+	c.SetD(0, d0)
+	c.SetPC(rtsStub)
 }
 
 // ---- memory helpers

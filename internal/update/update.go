@@ -67,6 +67,15 @@ var XFD = &Source{
 	Dirs:  map[string]string{"xfd_User/Libs/xfd": "xfd"},
 }
 
+// XPK is xpkmaster.library and its packer libraries from Aminet (xfdmaster
+// uses it to unpack XPK files).
+var XPK = &Source{
+	Name:  "xpkmaster.library",
+	URL:   "https://aminet.net/util/pack/xpk_User.lha",
+	Files: map[string]string{"xpk_User/Libs/xpkmaster.library": "xpkmaster.library"},
+	Dirs:  map[string]string{"xpk_User/Libs/compressors": "compressors"},
+}
+
 // The boot block database of Amiga Bootblock Reader (Jason and Jordan
 // Smith). Its repository has no licence, so it is never passed on: each
 // user fetches it from there.

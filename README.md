@@ -17,6 +17,9 @@ installed.
      (<https://aminet.net/util/pack/xfdmaster.lha>), so that programs packed
      with PowerPacker, Imploder, StoneCracker, CrunchMania and the like are
      unpacked and their insides checked too;
+   - **xpkmaster.library** and its 16 packer libraries from Aminet
+     (<https://aminet.net/util/pack/xpk_User.lha>), for files packed with XPK
+     (NUKE, SQSH, IMPL, MASH, RAKE, SHRI and the rest);
    - the **boot block database** of Amiga Bootblock Reader (Jason and Jordan
      Smith, <https://github.com/jasonthesmith79/AmigaBootBlockReader>): 3,040
      boot blocks and 314 byte patterns, a second opinion on boot blocks
@@ -79,7 +82,8 @@ not be checked (named in the output).
 ## Thanks
 
 xvs.library is © Georg Wittmann, Alex van Niel and Jan Erik Olausen;
-xfdmaster.library © Georg Hörmann and Dirk Stöcker; the boot block database
+xfdmaster.library © Georg Hörmann and Dirk Stöcker; XPK © Dirk Stöcker,
+Christian von Roques, Urban Dominik Müller and others; the boot block database
 © Jason and Jordan Smith. None of them is part of AmiScan: each is downloaded
 by you from where its authors publish it.
 All Amiga code runs inside AmiScan's emulated Amiga, which can only read its

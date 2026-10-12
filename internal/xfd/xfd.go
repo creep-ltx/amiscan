@@ -86,6 +86,10 @@ func (x *Decruncher) Decrunch(data []byte) (out []byte, packer string, err error
 		return nil, "", nil
 	}
 	m := x.m
+	// a packed file unpacks to at most 64 times its size here (and 32 MB
+	// is always allowed): broken ones claim gigabytes and would fill them
+	m.AllocLimit = uint32(min(max(int64(len(data))*64, 32<<20), int64(amiga.RAMSize)/2))
+	defer func() { m.AllocLimit = 0 }()
 	src := m.Copy(data)
 	if src == 0 {
 		return nil, "", errors.New("out of guest memory")

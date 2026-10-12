@@ -240,6 +240,46 @@ func (m *Machine) LoadLibrary(path string) (uint32, error) {
 	return base, nil
 }
 
+// startLibrary loads a library from inside an OS call and runs its init
+// code in steps (see guestCall); then gets the base, or 0.
+func (m *Machine) startLibrary(host string, then func(base uint32)) error {
+	data, err := os.ReadFile(host)
+	if err != nil {
+		return err
+	}
+	seg, hunks, err := m.LoadSeg(data)
+	if err != nil {
+		return err
+	}
+	rt := m.findRomTag(hunks)
+	if rt == 0 {
+		m.UnLoadSeg(seg)
+		return errors.New("no RomTag, not a library")
+	}
+	init := m.r32(rt + Resident_rt_Init)
+	if m.r8(rt+Resident_rt_Flags)&0x80 == 0 { // not RTF_AUTOINIT: init makes and adds the library
+		m.guestCall(init, map[string]uint32{"d0": 0, "a0": seg, "a6": m.SysBase}, then)
+		return nil
+	}
+	dataSize, vectors, structure, initFn := m.r32(init), m.r32(init+4), m.r32(init+8), m.r32(init+12)
+	base := m.makeLibrary(vectors, structure, dataSize)
+	if base == 0 {
+		return errors.New("MakeLibrary failed")
+	}
+	added := func(b uint32) {
+		if b != 0 {
+			m.Enqueue(m.SysBase+ExecBase_LibList, b)
+		}
+		then(b)
+	}
+	if initFn == 0 {
+		added(base)
+		return nil
+	}
+	m.guestCall(initFn, map[string]uint32{"d0": base, "a0": seg, "a6": m.SysBase}, added)
+	return nil
+}
+
 // OpenLibrary calls a loaded library's Open vector.
 func (m *Machine) OpenLibrary(base, version uint32) (uint32, error) {
 	if uint32(m.r16(base+Library_lib_Version)) < version {

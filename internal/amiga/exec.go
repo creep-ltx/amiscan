@@ -1,6 +1,9 @@
 package amiga
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // fakeLib is a library implemented in Go.
 type fakeLib struct {
@@ -33,6 +36,7 @@ func (m *Machine) newFakeLib(name string, version uint16, posSize uint32, nodeTy
 	m.w16(base+Library_lib_OpenCnt, 1)
 	f := &fakeLib{name: name, base: base, funcs: map[string]func(){}}
 	m.libs = append(m.libs, f)
+	m.fake[base] = true
 	return f
 }
 
@@ -240,19 +244,63 @@ func (m *Machine) setupExec() {
 	f["FindSemaphore"] = func() { ret(m.FindName(sb+ExecBase_SemaphoreList, m.CString(a(1)))) }
 	f["FindResident"] = func() { ret(0) }
 	f["FindPort"] = func() { ret(m.FindName(sb+ExecBase_PortList, m.CString(a(1)))) }
-	open := func(name string, version uint32) uint32 {
-		l := m.FindName(sb+ExecBase_LibList, name)
-		if l == 0 || uint32(m.r16(l+Library_lib_Version)) < version {
-			if m.Trace || l != 0 {
-				m.warnf("OpenLibrary(%q, %d): not available", name, version)
-			}
-			return 0
+	// OpenLibrary: a library in memory is opened through its Open
+	// function (Go libraries directly); one that is not is loaded from
+	// LIBS: like ramlib does, by running its init code in steps.
+	openLib := func(path string, version uint32) {
+		saved := m.saveRegs()
+		name := path
+		if i := strings.LastIndexAny(name, ":/"); i >= 0 {
+			name = name[i+1:]
 		}
-		m.w16(l+Library_lib_OpenCnt, m.r16(l+Library_lib_OpenCnt)+1)
-		return l
+		done := func(base uint32) {
+			if base == 0 && m.Trace {
+				m.warnf("OpenLibrary(%q, %d): not available", path, version)
+			}
+			m.osReturn(saved, base)
+		}
+		openIt := func(l uint32) {
+			if uint32(m.r16(l+Library_lib_Version)) < version {
+				done(0)
+				return
+			}
+			if m.fake[l] {
+				m.w16(l+Library_lib_OpenCnt, m.r16(l+Library_lib_OpenCnt)+1)
+				done(l)
+				return
+			}
+			m.guestCall(l-6, map[string]uint32{"d0": version, "a6": l}, done)
+		}
+		if l := m.FindName(sb+ExecBase_LibList, name); l != 0 {
+			openIt(l)
+			return
+		}
+		if l := m.FindName(sb+ExecBase_DeviceList, name); l != 0 && strings.HasSuffix(name, ".device") {
+			done(0)
+			return
+		}
+		file := path
+		if !strings.Contains(file, ":") {
+			file = "LIBS:" + file
+		}
+		host := m.hostPath(file)
+		if host == "" {
+			done(0)
+			return
+		}
+		if err := m.startLibrary(host, func(base uint32) {
+			if base == 0 {
+				done(0)
+				return
+			}
+			openIt(base)
+		}); err != nil {
+			m.warnf("OpenLibrary(%q): %v", path, err)
+			done(0)
+		}
 	}
-	f["OpenLibrary"] = func() { ret(open(m.CString(a(1)), d(0))) }
-	f["OldOpenLibrary"] = func() { ret(open(m.CString(a(1)), 0)) }
+	f["OpenLibrary"] = func() { openLib(m.CString(a(1)), d(0)) }
+	f["OldOpenLibrary"] = func() { openLib(m.CString(a(1)), 0) }
 	f["CloseLibrary"] = func() {
 		if l := a(1); l != 0 {
 			m.w16(l+Library_lib_OpenCnt, m.r16(l+Library_lib_OpenCnt)-1)
@@ -312,12 +360,14 @@ func (m *Machine) setupExec() {
 		ret(old)
 	}
 	f["MakeLibrary"] = func() {
-		if a(2) != 0 {
-			m.warnf("MakeLibrary with an init function is not supported")
-			ret(0)
+		// MakeLibrary(vectors a0, structure a1, init a2, dataSize d0, segList d1)
+		base := m.makeLibrary(a(0), a(1), d(0))
+		if a(2) == 0 || base == 0 {
+			ret(base)
 			return
 		}
-		ret(m.makeLibrary(a(0), a(1), d(0)))
+		saved := m.saveRegs()
+		m.guestCall(a(2), map[string]uint32{"d0": base, "a0": d(1), "a6": sb}, func(d0 uint32) { m.osReturn(saved, d0) })
 	}
 	f["MakeFunctions"] = func() { ret(m.makeFunctions(a(0), a(1), a(2))) }
 	f["InitStruct"] = func() { m.initStruct(a(1), a(2), d(0)) }
@@ -329,7 +379,30 @@ func (m *Machine) setupExec() {
 	f["RemLibrary"] = func() { m.Remove(a(1)); ret(0) }
 	f["Alert"] = func() { m.CPU.Fail(fmt.Errorf("guest called Alert($%08x)", d(7))) }
 	f["Debug"] = func() {}
-	f["RawDoFmt"] = func() { m.warnf("RawDoFmt not emulated"); ret(a(0)) }
+	f["RawDoFmt"] = func() {
+		// RawDoFmt(format a0, data a1, putChProc a2, putChData a3)
+		text, next := m.rawDoFmt(a(0), a(1))
+		text += "\x00" // the closing NUL goes through PutChProc too
+		proc, buf := a(2), a(3)
+		if proc == 0 || m.r32(proc) == 0x16c04e75 { // NULL or "move.b d0,(a3)+ ; rts"
+			if dst := m.Bytes(buf, uint32(len(text))); dst != nil {
+				copy(dst, text)
+			}
+			ret(next)
+			return
+		}
+		// a PutChProc of its own: call it once per character, in steps
+		saved := m.saveRegs()
+		var put func(i int)
+		put = func(i int) {
+			if i == len(text) {
+				m.osReturn(saved, next)
+				return
+			}
+			m.guestCall(proc, map[string]uint32{"d0": uint32(text[i]), "a3": m.CPU.A(3)}, func(uint32) { put(i + 1) })
+		}
+		put(0)
+	}
 	f["CreatePool"] = func() {
 		p := m.Alloc(8, true)
 		m.w32(p, d(1)) // remember the flags
@@ -357,7 +430,7 @@ const (
 
 // allocMem is AllocMem / AllocVec (vec stores the size in front).
 func (m *Machine) allocMem(size, flags uint32, vec bool) uint32 {
-	if size == 0 || size > RAMSize {
+	if size == 0 || size > RAMSize || (m.AllocLimit != 0 && size > m.AllocLimit) {
 		return 0
 	}
 	if !vec {

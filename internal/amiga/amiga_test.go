@@ -112,3 +112,20 @@ func TestRunawayIsStopped(t *testing.T) {
 		t.Fatal("endless loop not stopped")
 	}
 }
+
+func TestRawDoFmt(t *testing.T) {
+	m := machine(t)
+	fmtStr := m.PutString("compressors/xpk%s.library %d %ld %04x %-5s|%c")
+	name := m.PutString("NUKE")
+	data := m.Alloc(32, true)
+	m.w32(data, name)
+	m.w16(data+4, 0xfffe) // -2 as a word
+	m.w32(data+6, 100000)
+	m.w16(data+10, 0xab)
+	m.w32(data+12, name)
+	m.w16(data+16, 'Z')
+	got, next := m.rawDoFmt(fmtStr, data)
+	if want := "compressors/xpkNUKE.library -2 100000 00ab NUKE |Z"; got != want || next != data+18 {
+		t.Fatalf("got %q next +%d, want %q +18", got, next-data, want)
+	}
+}

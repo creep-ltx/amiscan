@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"runtime/pprof"
 	"strings"
 	"time"
 
@@ -70,6 +71,12 @@ func main() {
 	checkLib := flag.String("check-library", "", "") // internal: load one library from -libs, print its version
 	flag.Usage = usage
 	flag.Parse()
+	if p := os.Getenv("AMISCAN_CPUPROFILE"); p != "" { // developers: where the time goes
+		if f, err := os.Create(p); err == nil {
+			pprof.StartCPUProfile(f)
+			defer pprof.StopCPUProfile()
+		}
+	}
 
 	if *checkLib != "" {
 		os.Exit(checkLibrary(*libs, *checkLib))
@@ -89,7 +96,12 @@ func main() {
 		fmt.Fprintln(os.Stderr, "amiscan:", err)
 		os.Exit(exitTrouble)
 	}
-	s.Machine().Trace = *trace
+	// the emulated Amiga's own notes are for debugging, not for users
+	if *trace {
+		m.Trace = true
+	} else {
+		m.Log = nil
+	}
 	if ok, err := s.SelfTest(); !ok || err != nil {
 		fmt.Fprintf(os.Stderr, "amiscan: xvs.library failed its self test (%v); download it again from %s\n", err, xvsURL)
 		os.Exit(exitTrouble)
@@ -122,6 +134,11 @@ func main() {
 		} else {
 			fmt.Println(xfdNote)
 		}
+		if _, err := os.Stat(filepath.Join(dir, "xpkmaster.library")); err == nil {
+			fmt.Println("xpkmaster.library installed: XPK files are unpacked")
+		} else {
+			fmt.Println(`xpkmaster.library not installed ("amiscan -update" fetches it)`)
+		}
 		if bdb != nil {
 			fmt.Printf("Amiga Bootblock Reader database: %d boot blocks\n", bdb.Size())
 		} else {
@@ -148,7 +165,9 @@ func main() {
 	for _, arg := range flag.Args() {
 		r.scanPath(arg)
 	}
-	os.Exit(r.finish())
+	code := r.finish()
+	pprof.StopCPUProfile()
+	os.Exit(code)
 }
 
 // runUpdate fetches xvs.library into the libs folder: the one named, else
@@ -171,11 +190,12 @@ func runUpdate(flagDir string, force bool) int {
 	u := &update.Updater{Dir: dir, Log: func(s string) { fmt.Println("  " + s) }}
 	update.XVS.Version = libraryVersion("xvs.library")
 	update.XFD.Version = libraryVersion("xfdmaster.library")
+	update.XPK.Version = libraryVersion("xpkmaster.library")
 	update.BootBrain.Version = bootDBVersion(false)
 	update.BootSearch.Version = bootDBVersion(true)
 	fmt.Printf("Updating %s\n", dir)
 	code := exitClean
-	for _, src := range []*update.Source{update.XVS, update.XFD, update.BootBrain, update.BootSearch} {
+	for _, src := range []*update.Source{update.XVS, update.XFD, update.XPK, update.BootBrain, update.BootSearch} {
 		results, err := u.Update(ctx, src, force)
 		for _, r := range results {
 			fmt.Println(r)
@@ -236,6 +256,16 @@ func checkLibrary(dir, name string) int {
 			return exitTrouble
 		}
 		id = d.IDString
+	case "xpkmaster.library":
+		lib, err := m.LoadLibrary(filepath.Join(dir, name))
+		if err == nil {
+			lib, err = m.OpenLibrary(lib, 0)
+		}
+		if err != nil || lib == 0 {
+			fmt.Fprintln(os.Stderr, "xpkmaster.library does not start", err)
+			return exitTrouble
+		}
+		id = m.Latin1String(m.Read32(lib + amiga.Library_lib_IdString))
 	default:
 		fmt.Fprintln(os.Stderr, "unknown library", name)
 		return exitTrouble

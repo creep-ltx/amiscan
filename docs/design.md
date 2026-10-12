@@ -69,6 +69,29 @@ What xvs.library needs, found by tracing it under vamos (see
 Only one CPU per process (Musashi is global C state). BBX should run one
 AmiScan per scan, or one long-lived scanner behind a lock.
 
+## Libraries opened while guest code runs, XPK (2026-10-12)
+
+`OpenLibrary` of a library that is not in memory loads it from LIBS: (a name
+without a device is LIBS:name, so "compressors/xpkNUKE.library" works) and runs
+its init and Open code. Musashi cannot be re-entered from a trap, so this runs in
+steps: `guestCall` points the CPU at the function with `resumeStub` as return
+address and pushes a Go continuation; the resume trap pops it; the last step's
+`osReturn` restores D2-D7/A2-A6, sets D0 and jumps to an RTS. `MakeLibrary` with
+an init function and utility's `CallHookPkt` use the same. Real libraries already
+in memory are now opened through their Open vector; Go ones directly.
+
+XPK needed besides: gadtools/asl/locale stand-ins (xpkmaster opens them for its
+password window), a real utility.library (tag lists: NextTagItem, FindTagItem,
+GetTagData, ...; 32/64-bit math), exec `RawDoFmt` (it builds
+"compressors/xpk%s.library"; the standard "move.b d0,(a3)+" PutChProc is done in Go,
+any other is called per character in steps) and intuition `CurrentTime`. A NUKE
+file from the user's doors unpacks to the 6,344 bytes its XPK header promises.
+
+Unpacking cap: while xfd runs, one AllocMem may be at most 64 x the packed size
+(at least 32 MB). Without it a damaged Crunch 1.3 file (an Ebola-infected one in
+the collection) made xfdmaster fill gigabytes of the 2 GB fast RAM: a whole scan
+went from 1.4 s to 6.5 s. With 12 MB of RAM it had simply failed.
+
 ## Damaged archives (2026-10-12)
 
 On the user's 61,859-file BBS door collection 255 items were "not checked": 165
