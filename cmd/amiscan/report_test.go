@@ -42,3 +42,9 @@ func TestParseShow(t *testing.T) {
 		t.Fatal("bogus kind accepted")
 	}
 }
+
+func TestUniform(t *testing.T) {
+	if !uniform(nil) || !uniform(make([]byte, 1000)) || uniform([]byte{0, 0, 1}) {
+		t.Fatal("uniform is wrong")
+	}
+}

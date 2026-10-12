@@ -150,12 +150,26 @@ func (sc *scanner) checkFile(path string, data []byte, damaged string) finding {
 		if damaged != "" {
 			f.Reason = "also damaged: " + damaged
 		}
+	case damaged != "" && uniform(data):
+		// Nothing in it: BBS adverts are archive entries whose name is the
+		// advert and whose few bytes of "data" claim megabytes of nothing.
+		f.Result, f.Type = resClean, "no contents: a fake archive entry, as BBS adverts use ("+damaged+")"
 	case damaged != "":
 		f.Result, f.Type, f.Reason = resDamaged, fileTypes[res.Type], damaged
 	default:
 		f.Result, f.Type = resClean, fileTypes[res.Type]
 	}
 	return f
+}
+
+// uniform reports whether data is empty or one byte value repeated.
+func uniform(data []byte) bool {
+	for _, b := range data {
+		if b != data[0] {
+			return false
+		}
+	}
+	return true
 }
 
 // unpack decrunches a packed file with xfdmaster and checks what is inside.
