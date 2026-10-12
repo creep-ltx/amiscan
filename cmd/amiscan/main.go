@@ -334,6 +334,7 @@ type finding struct {
 	// FoundBy is "xvs" or "bootblock database" for a virus; for a boot
 	// block the database names, Type holds its name and class.
 	FoundBy string `json:"found_by,omitempty"`
+	top     string // the file on disk it is in
 	// Damaged: the archive could not give the whole file (why); the part
 	// that unpacked was checked, which is what LhA itself would write out.
 	Damaged string `json:"damaged,omitempty"`
@@ -348,6 +349,8 @@ type reporter struct {
 	start   time.Time
 
 	files, boots, unpacked, viruses, skipped, errs, damaged int
+	found                                                   []finding // the viruses, for the list at the end
+	top                                                     string    // the file on disk being checked
 }
 
 // maxLayers is how many times a file packed inside a packed file is unpacked.
@@ -375,6 +378,7 @@ func (r *reporter) scanPath(arg string) {
 			r.report(finding{Path: p, Kind: "file", Result: "error", Detail: err.Error()})
 			return nil
 		}
+		r.top = p
 		diz.Walk(p, data, limits, r.check, func(path string, err error, damaged bool) {
 			if damaged {
 				r.report(finding{Path: path, Kind: "file", Result: "damaged", Detail: err.Error()})
@@ -494,6 +498,8 @@ func (r *reporter) report(f finding) {
 	switch f.Result {
 	case "virus":
 		r.viruses++
+		f.top = r.top
+		r.found = append(r.found, f)
 	case "skipped":
 		r.skipped++
 	case "error":
@@ -536,6 +542,28 @@ func (r *reporter) report(f finding) {
 	}
 }
 
+// listViruses repeats every virus at the end, grouped by the file on disk
+// that holds it (the upload to delete), with where inside it was found.
+func (r *reporter) listViruses() {
+	if len(r.found) == 0 {
+		return
+	}
+	fmt.Printf("\nViruses found:\n")
+	last := ""
+	for _, f := range r.found {
+		if f.top != last {
+			fmt.Printf("\n  %s\n", f.top)
+			last = f.top
+		}
+		inside := strings.TrimPrefix(strings.TrimPrefix(f.Path, f.top), "/")
+		if inside == "" {
+			inside = "(the file itself)"
+		}
+		fmt.Printf("      %-40s %s (%s)\n", inside, f.Virus, f.Type)
+	}
+	fmt.Println()
+}
+
 func (r *reporter) finish() int {
 	took := time.Since(r.start).Round(time.Millisecond)
 	code := exitClean
@@ -553,6 +581,7 @@ func (r *reporter) finish() int {
 		fmt.Println(string(b))
 		return code
 	}
+	r.listViruses()
 	verdict := "no viruses found"
 	if r.viruses == 1 {
 		verdict = "1 VIRUS FOUND"

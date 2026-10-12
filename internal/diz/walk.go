@@ -61,7 +61,7 @@ func (w *walker) walk(name string, data []byte, depth int, damaged string) (err 
 	}
 	head := data[:min(len(data), headSize)]
 	ext := strings.ToLower(strings.TrimPrefix(path.Ext(name), "."))
-	f := detect(head, int64(len(data)), ext)
+	f := detectContent(head, int64(len(data)), ext)
 	if f == nil || f.name == "amigaexe" {
 		return nil
 	}
@@ -81,15 +81,10 @@ func (w *walker) walk(name string, data []byte, depth int, damaged string) (err 
 	}
 	ms, _, ok := listAll(bytes.NewReader(data), int64(len(data)), f)
 	if !ok {
-		// The file itself was checked. Say so only when it really starts like
-		// that kind of archive: a text called History.lha is no archive, and
-		// a program that looks like a self-extractor or a disk without
-		// AmigaDOS files is not a problem.
-		byMagic := f.magic != nil && f.magic(head, int64(len(data)))
-		if f.name == "lzx" && (len(head) < 4 || head[3] != 0) {
-			byMagic = false // a script that starts with the word LZX; archives have "LZX\0"
-		}
-		if byMagic && f.name != "adf" && f.name != "adz" && f.name != "dms" && f.name != "sfx" && f.name != "hdf" {
+		// The file itself was checked; its header said archive but the rest
+		// is broken. A program that looks like a self-extractor or a disk
+		// without AmigaDOS files is not a problem.
+		if f.name != "adf" && f.name != "adz" && f.name != "dms" && f.name != "sfx" && f.name != "hdf" {
 			w.warn(name, fmt.Errorf("starts like %s but its contents cannot be read", f.name), true)
 		}
 		return nil
@@ -122,6 +117,24 @@ func (w *walker) walk(name string, data []byte, depth int, damaged string) (err 
 		}
 	}
 	return nil
+}
+
+// detectContent names the format from the file's own header, as AmigaOS
+// does: a text called History.lha is a text. The name only chooses between
+// formats that share a header (a gzipped disk image is still gzip).
+func detectContent(head []byte, size int64, ext string) *format {
+	f := detect(head, size, ext)
+	if f == nil || f.magic == nil || !f.magic(head, size) {
+		// detect fell back on the name; a gzip header with an .adz name is fine
+		if f != nil && f.name == "adz" && isGzip(head, size) {
+			return f
+		}
+		return nil
+	}
+	if f.name == "lzx" && (len(head) < 4 || head[3] != 0) {
+		return nil // "LZX" then a zero byte; a script starting with the word LZX is a text
+	}
+	return f
 }
 
 // bootBlock returns the first 1024 bytes of a floppy image, or nil.
