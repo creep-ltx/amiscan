@@ -10,12 +10,26 @@ installed.
 ## Setting up
 
 1. Put `amiscan` anywhere on your path, e.g. `~/.local/bin/`.
-2. Download **xvs.library** from the Virus Help Team:
-   <https://www.vht-dk.dk/amiga/xvs/xvs.htm> (the `xvslibrary.lha` archive).
-3. Take `xvs/libs/xvs.library` out of the archive and put it in
+2. Run `amiscan -update`. It downloads **xvs.library**, the virus database,
+   from the Virus Help Team (<https://www.vht-dk.dk/amiga/xvs/xvs.htm>) into
    `~/.local/share/amiscan/libs/`.
 
-AmiScan looks for xvs.library in these folders, first one wins:
+Run `amiscan -update` now and then (AmiScan reminds you after 30 days). It
+only downloads when the Virus Help Team has published something new, and it
+installs a new xvs.library only when:
+
+- it carries Georg Wittmann's signature, checked against his key built into
+  AmiScan (a changed or fake library is refused),
+- it loads and passes its own self test,
+- it is not older than the one you have.
+
+The previous library is kept in `libs/old/`, the archive as published in
+`libs/archives/`. If a library ever needs a key file (xvs.library does not),
+`-update` fetches that too when it is missing.
+
+You can also install xvs.library by hand: take `xvs/libs/xvs.library` out of
+`xvslibrary.lha` and put it in the libs folder. AmiScan looks in these
+folders, first one wins:
 
 - the folder named with `-libs`
 - `$AMISCAN_LIBS`
@@ -23,14 +37,13 @@ AmiScan looks for xvs.library in these folders, first one wins:
 - `libs/` next to the `amiscan` program
 - `/usr/local/share/amiscan/libs`, `/usr/share/amiscan/libs`
 
-When a new xvs.library comes out, replace the file. That is the whole update.
-
 ## Using it
 
     amiscan Downloads/                 check a folder
     amiscan -v game.adf                list every file checked
     amiscan -list                      the viruses xvs.library knows
     amiscan -version                   which xvs.library is in use
+    amiscan -update                    fetch the newest xvs.library
     amiscan -json upload.lha           machine-readable, one line per file
 
 It opens ADF, ADZ, DMS and HDF disk images, and LhA, LZX, Zip, 7z, RAR, ARJ,

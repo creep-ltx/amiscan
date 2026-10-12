@@ -3,17 +3,22 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/creep-ltx/amiscan/internal/diz"
+	"github.com/creep-ltx/amiscan/internal/update"
 	"github.com/creep-ltx/amiscan/internal/xvs"
 )
 
@@ -32,6 +37,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, `AmiScan %s - checks Amiga files, disks and archives for Amiga viruses
 
 usage: amiscan [options] FILE|FOLDER ...
+       amiscan -update        fetch the newest xvs.library (the virus database)
        amiscan -list          show every virus xvs.library knows
 
 Disk images (ADF, ADZ, DMS, HDF) and archives (LhA, LZX, Zip, 7z, RAR, ...) are
@@ -43,9 +49,9 @@ options:
 `, version)
 	flag.PrintDefaults()
 	fmt.Fprintf(os.Stderr, `
-AmiScan needs xvs.library, the virus database, from the Virus Help Team:
-  %s
-Put xvs.library in %s (or name the folder with -libs or AMISCAN_LIBS).
+AmiScan needs xvs.library, the virus database, from the Virus Help Team
+(%s). "amiscan -update" fetches it into
+%s (or the folder named with -libs or AMISCAN_LIBS).
 `, xvsURL, defaultLibs()[0])
 }
 
@@ -56,13 +62,18 @@ func main() {
 	list := flag.Bool("list", false, "list the viruses xvs.library knows")
 	trace := flag.Bool("trace", false, "log every Amiga OS call (debugging)")
 	showVersion := flag.Bool("version", false, "show the versions")
+	doUpdate := flag.Bool("update", false, "download the newest xvs.library (and any key files it needs)")
+	force := flag.Bool("force", false, "with -update: download even when nothing changed")
 	flag.Usage = usage
 	flag.Parse()
 
+	if *doUpdate {
+		os.Exit(runUpdate(*libs, *force))
+	}
 	dir, err := findLibs(*libs)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "amiscan:", err)
-		fmt.Fprintf(os.Stderr, "Get xvs.library from %s\nand put it in %s\n", xvsURL, defaultLibs()[0])
+		fmt.Fprintln(os.Stderr, `Run "amiscan -update" to download it.`)
 		os.Exit(exitTrouble)
 	}
 	s, err := xvs.Open(dir)
@@ -89,11 +100,67 @@ func main() {
 	r := &reporter{s: s, json: *jsonOut, verbose: *verbose, start: time.Now()}
 	if !r.json {
 		fmt.Printf("AmiScan %s with %s\n", version, s.IDString)
+		if t := update.LastChecked(dir, update.XVS.Name); !t.IsZero() && time.Since(t) > 30*24*time.Hour {
+			fmt.Fprintf(os.Stderr, "amiscan: no update check for %d days; run \"amiscan -update\"\n", int(time.Since(t).Hours()/24))
+		}
 	}
 	for _, arg := range flag.Args() {
 		r.scanPath(arg)
 	}
 	os.Exit(r.finish())
+}
+
+// runUpdate fetches xvs.library into the libs folder: the one named, else
+// the one in use, else the first default.
+func runUpdate(flagDir string, force bool) int {
+	dir := flagDir
+	if dir == "" {
+		if found, err := findLibs(""); err == nil && update.Writable(found) == nil {
+			dir = found
+		} else {
+			dir = defaultLibs()[0]
+		}
+	}
+	if err := update.Writable(dir); err != nil {
+		fmt.Fprintf(os.Stderr, "amiscan: cannot write to %s (%v); name another folder with -libs\n", dir, err)
+		return exitTrouble
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	u := &update.Updater{Dir: dir, Log: func(s string) { fmt.Println("  " + s) }}
+	update.XVS.Version = xvsVersion
+	fmt.Printf("Updating %s\n", dir)
+	results, err := u.Update(ctx, update.XVS, force)
+	for _, r := range results {
+		fmt.Println(r)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "amiscan:", err)
+		return exitTrouble
+	}
+	return exitClean
+}
+
+var xvsVersionRe = regexp.MustCompile(`xvs (\d+\.\d+ \([^)]*\))`)
+
+// xvsVersion starts a second amiscan on the library in dir: it must load
+// and pass its self test (one emulated Amiga per process, so not in this one).
+func xvsVersion(dir string) (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, exe, "-libs", dir, "-version").CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("%s", strings.TrimSpace(string(out)))
+	}
+	m := xvsVersionRe.FindStringSubmatch(string(out))
+	if m == nil {
+		return "", fmt.Errorf("no version in %q", out)
+	}
+	return m[1], nil
 }
 
 // defaultLibs are the folders searched for xvs.library, in order.
@@ -298,7 +365,13 @@ func (r *reporter) finish() int {
 	} else if r.viruses > 1 {
 		verdict = fmt.Sprintf("%d VIRUSES FOUND", r.viruses)
 	}
-	fmt.Printf("Checked %d files and %d boot blocks in %s: %s", r.files, r.boots, took, verdict)
+	plural := func(n int, one, many string) string {
+		if n == 1 {
+			return "1 " + one
+		}
+		return fmt.Sprintf("%d %s", n, many)
+	}
+	fmt.Printf("Checked %s and %s in %s: %s", plural(r.files, "file", "files"), plural(r.boots, "boot block", "boot blocks"), took, verdict)
 	if r.skipped+r.errs > 0 {
 		fmt.Printf(", %d not checked", r.skipped+r.errs)
 	}

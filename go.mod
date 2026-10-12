@@ -18,4 +18,5 @@ require (
 	github.com/spf13/afero v1.15.0 // indirect
 	github.com/stangelandcl/ppmd v0.1.1 // indirect
 	go4.org v0.0.0-20260112195520-a5071408f32f // indirect
+	golang.org/x/crypto/x509roots/fallback v0.0.0-20261011195143-3b414e3e8284 // indirect
 )

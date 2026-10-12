@@ -12,6 +12,7 @@
   independent emulator). Tests: `AMISCAN_LIBS=... AMISCAN_SAMPLES=<unpacked
   collection> make test`. Download the collection again when needed; never commit
   samples.
+- `amiscan -update` (2026-10-12) installs and updates xvs.library, signature-checked.
 - Next: see "Later" below.
 
 ## How it works
@@ -48,6 +49,27 @@ What xvs.library needs, found by tracing it under vamos (see
 
 Only one CPU per process (Musashi is global C state). BBX should run one
 AmiScan per scan, or one long-lived scanner behind a lock.
+
+## Updating (internal/update)
+
+`amiscan -update` fetches each `update.Source` (an LhA archive URL, which members go
+to the libs folder, which are PGP-signed and by whom, what it `Needs`). Steps: GET
+with If-None-Match/If-Modified-Since; same SHA-256 as last time is "up to date";
+unpack with the LhA reader; verify signatures; write to `libs/.update-*/`; run a
+second amiscan on that folder (`-libs tmp -version`: one emulated Amiga per
+process, so the check is a child process) which must load the library and pass
+its self test; refuse an older version; move the old files to `libs/old/`, the
+new into place, the archive to `libs/archives/`; state in `amiscan-update.json`.
+`Needs` (free key files) are fetched only when their files are missing.
+
+Georg's key is PGP 2 (v3, RSA 1024, MD5 signatures); gpg 2 no longer reads it, so
+`pgp2.go` checks it itself. Key ID 650EC4D80A831D77, fingerprint
+2B53 8234 CBD3 4C5B 5F71 B8C3 6538 2290, from vht-dk.dk/amiga/xvs/gh-pgp.txt and
+identical to Georg.asc in the archive. If he ever signs with a new key, AmiScan
+refuses the update until the new key is built in.
+
+HTTPS uses the system's certificates, or Mozilla's built in
+(`x/crypto/x509roots/fallback`) on a system without any.
 
 ## Licence of the parts
 
