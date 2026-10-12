@@ -1,6 +1,6 @@
 # AmiScan
 
-**An Amiga virus scanner for Linux and Windows.** It checks files, folders, Amiga
+**An Amiga virus scanner for Linux, Windows and macOS.** It checks files, folders, Amiga
 disk images and archives for boot, file, link and data viruses, and it was made
 for checking uploads on Amiga-style BBSes the way Amiga file checkers did.
 
@@ -52,7 +52,7 @@ Checked 105508 files (532 of them unpacked) and 8 boot blocks in 18.4s: 15 VIRUS
 
 ## Quick start
 
-1. Download `amiscan` (Linux) or `amiscan.exe` (Windows) from the
+1. Download AmiScan for Linux, Windows or macOS from the
    [releases](https://github.com/creep-ltx/amiscan/releases), or build it (below).
 2. Fetch the virus database and unpackers:
 

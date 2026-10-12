@@ -11,9 +11,18 @@ The [releases](https://github.com/creep-ltx/amiscan/releases) have:
 - `amiscan-VERSION-linux-x86_64.tar.gz`: a static Linux program that runs on any
   distribution, with the manual page and documentation;
 - `amiscan-VERSION-windows-x86_64.zip`: `amiscan.exe` for Windows 10 and 11;
-- macOS programs for Apple Silicon and Intel Macs.
+- `amiscan-VERSION-macos-arm64.tar.gz` (Apple Silicon) and
+  `amiscan-VERSION-macos-x86_64.tar.gz` (Intel Macs).
 
-`SHA256SUMS` lists their checksums.
+GitHub shows each file's SHA-256 checksum on the release page.
+
+**On a Mac**, a program downloaded from the internet that is not signed by a
+registered Apple developer is stopped the first time ("cannot be opened because
+the developer cannot be verified"). Allow it once in the Terminal:
+
+    xattr -d com.apple.quarantine amiscan
+
+or in System Settings, Privacy & Security, "Open Anyway".
 
 Put the program anywhere on your path (`~/.local/bin`, `/usr/local/bin`, a folder
 in Windows' `PATH`), then:

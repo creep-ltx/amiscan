@@ -117,8 +117,10 @@ zeros). Amiga names with Windows-forbidden characters (xfd's decruncher "Ace?") 
 stored as %XX (`amiga.HostName`/`AmigaName`) on every host. Parts folder: XDG on
 Linux, os.UserConfigDir()/AmiScan/libs on Windows and macOS. Verified under Wine 2026-10-12: -update
 installs all four parts; the virus collection gives the same verdict as Linux for
-all 3,102 items. Not yet run on real Windows. macOS: not built yet (needs a Mac or
-GitHub's macOS runners; see Knowledge/macos/).
+all 3,102 items. Since 2026-10-12 GitHub Actions (.github/workflows/build.yml) builds and tests on
+real Windows and macOS too, including -update and every test against the real
+parts; tags v* publish Linux, Windows, macOS arm64 and macOS x86_64 (cross-built
+on the arm64 runner with clang -arch x86_64) archives.
 
 ## Damaged archives (2026-10-12)
 
