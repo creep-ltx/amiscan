@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -77,6 +78,8 @@ func main() {
 	showList := flag.String("show", "virus,damaged,unchecked", "what the report lists: virus, damaged, unchecked, clean, all or none")
 	verbose := flag.Bool("v", false, "list the clean files too (same as -show all)")
 	quiet := flag.Bool("q", false, "only the summary line (same as -show none)")
+	outFile := flag.String("o", "", "write the report to this file; .txt, .md, .html or .json picks the format")
+	format := flag.String("format", "", "report format: text, markdown, html, json or bbs (default: from -o's extension, else text)")
 	list := flag.Bool("list", false, "list the viruses xvs.library knows")
 	trace := flag.Bool("trace", false, "log every Amiga OS call (debugging)")
 	showVersion := flag.Bool("version", false, "show the versions")
@@ -172,9 +175,40 @@ func main() {
 	case *bbsOut:
 		mode = outBBS
 	}
-	r := newReporter(mode, show)
+	switch f := strings.ToLower(*format); f {
+	case "":
+	case "text", "txt":
+		mode = outText
+	case "markdown", "md":
+		mode = outMarkdown
+	case "html", "htm":
+		mode = outHTML
+	case "json":
+		mode = outJSON
+	case "bbs":
+		mode = outBBS
+	default:
+		fmt.Fprintf(os.Stderr, "amiscan: -format %q: use text, markdown, html, json or bbs\n", *format)
+		os.Exit(codeUnchecked)
+	}
+	var w io.Writer = os.Stdout
+	if *outFile != "" {
+		f, picked, err := openReport(*outFile, *format)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "amiscan:", err)
+			os.Exit(codeUnchecked)
+		}
+		defer f.Close()
+		w = f
+		if *format == "" && !*jsonOut && !*bbsOut {
+			mode = picked
+		}
+	}
+	r := newReporter(mode, show, w)
+	r.file = *outFile
+	r.info = reportInfo{Started: time.Now(), Paths: flag.Args(), Parts: partsList(m, dir, s, dec, bdb)}
 	sc := &scanner{s: s, dec: dec, bdb: bdb, r: r}
-	if mode == outText {
+	if mode == outText && *outFile == "" {
 		fmt.Printf("AmiScan %s with %s\n", version, s.IDString)
 	}
 	if xfdNote != "" && mode != outJSON {
@@ -188,6 +222,12 @@ func main() {
 	}
 	code := r.finish()
 	pprof.StopCPUProfile()
+	if c, ok := w.(io.Closer); ok && *outFile != "" {
+		if err := c.Close(); err != nil {
+			fmt.Fprintln(os.Stderr, "amiscan: writing the report:", err)
+			code = codeUnchecked
+		}
+	}
 	os.Exit(code)
 }
 
@@ -319,6 +359,50 @@ func libraryVersion(name string) func(dir string) (string, error) {
 	}
 }
 
+// partsList names the installed parts and their versions, for reports.
+func partsList(m *amiga.Machine, dir string, s *xvs.Scanner, dec *xfd.Decruncher, bdb *bootdb.DB) [][2]string {
+	ver := func(id string) string {
+		if v := idVersionRe.FindString(id); v != "" {
+			return v
+		}
+		return id
+	}
+	parts := [][2]string{{"xvs.library", ver(s.IDString)}}
+	if dec != nil {
+		parts = append(parts, [2]string{"xfdmaster.library", ver(dec.IDString)})
+	} else {
+		parts = append(parts, [2]string{"xfdmaster.library", "not installed"})
+	}
+	parts = append(parts, [2]string{"xpkmaster.library", xpkVersion(m, dir)})
+	if bdb != nil {
+		brain, search := bdb.Counts()
+		parts = append(parts, [2]string{"boot block database", fmt.Sprintf("%d boot blocks, %d byte patterns", brain, search)})
+	} else {
+		parts = append(parts, [2]string{"boot block database", "not installed"})
+	}
+	return parts
+}
+
+// xpkVersion loads xpkmaster.library (xfdmaster would on the first XPK
+// file anyway) and returns its version, or why there is none.
+func xpkVersion(m *amiga.Machine, dir string) string {
+	if _, err := os.Stat(filepath.Join(dir, "xpkmaster.library")); err != nil {
+		return "not installed"
+	}
+	lib, err := m.LoadLibrary(filepath.Join(dir, "xpkmaster.library"))
+	if err == nil {
+		lib, err = m.OpenLibrary(lib, 0)
+	}
+	if err != nil || lib == 0 {
+		return "installed but does not start"
+	}
+	id := m.Latin1String(m.Read32(lib + amiga.Library_lib_IdString))
+	if v := idVersionRe.FindString(id); v != "" {
+		return v
+	}
+	return id
+}
+
 // showVersions lists the parts AmiScan works with and what each does.
 func showVersions(m *amiga.Machine, dir string, s *xvs.Scanner, dec *xfd.Decruncher, bdb *bootdb.DB) {
 	missing := "not installed"
@@ -336,17 +420,7 @@ func showVersions(m *amiga.Machine, dir string, s *xvs.Scanner, dec *xfd.Decrunc
 		xfdState = ver(dec.IDString)
 	}
 	line("xfdmaster.library", xfdState, "unpacks packed programs")
-	if _, err := os.Stat(filepath.Join(dir, "xpkmaster.library")); err == nil {
-		lib, err := m.LoadLibrary(filepath.Join(dir, "xpkmaster.library"))
-		if err == nil {
-			lib, err = m.OpenLibrary(lib, 0)
-		}
-		if err == nil && lib != 0 {
-			xpkState = ver(m.Latin1String(m.Read32(lib + amiga.Library_lib_IdString)))
-		} else {
-			xpkState = "installed but does not start"
-		}
-	}
+	xpkState = xpkVersion(m, dir)
 	line("xpkmaster.library", xpkState, "unpacks XPK files")
 	if bdb != nil {
 		brain, search := bdb.Counts()

@@ -59,6 +59,7 @@ folders, first one wins:
     amiscan -show virus Downloads/     list only the viruses
     amiscan -v game.adf                list the clean files too
     amiscan -q Downloads/              only the summary line
+    amiscan -o report.html Downloads/  the report as a web page (.txt, .md, .html, .json)
     amiscan -list                      the viruses xvs.library knows
     amiscan -version                   what is installed
     amiscan -update                    fetch the newest databases and unpackers
@@ -83,6 +84,12 @@ and why:
 
 `-show` picks which of `virus`, `damaged`, `unchecked`, `clean` are listed
 (default: the first three); `-v` is `-show all`, `-q` is `-show none`.
+
+`-o FILE` saves the report instead: plain text (`.txt`), Markdown (`.md`),
+a web page (`.html`, light or dark as your system is) or JSON (`.json`);
+`-format` overrides the extension. A saved report also says when the scan
+ran, what was checked and which versions of the databases were used; the
+terminal gets the summary line and where the report went.
 
 ### For BBS software: -bbs
 
