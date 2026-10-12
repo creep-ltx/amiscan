@@ -21,15 +21,15 @@ import (
 )
 
 // Memory map: "chip" RAM below the CIA and custom chip ranges, as on any
-// Amiga, and 2 GB of fast RAM from 16 MB up, as on an accelerator card.
+// Amiga, and fast RAM from 16 MB up, as on an accelerator card.
 const (
 	lowEnd      = 0xbe0000
 	fastStart   = 0x01000000
-	RAMSize     = fastStart + 0x7f000000 // 2 GB of fast RAM
-	vectorStubs = 0x400                  // 256 x (ILLEGAL, trap) = 1 KiB
-	stopStub    = 0x800                  // a guest call returns here
-	resumeStub  = 0x804                  // a nested guest call returns here
-	rtsStub     = 0x808                  // RTS: ends an OS call that ran guest code
+	maxFastRAM  = 0x7f000000 // 2 GB
+	vectorStubs = 0x400      // 256 x (ILLEGAL, trap) = 1 KiB
+	stopStub    = 0x800      // a guest call returns here
+	resumeStub  = 0x804      // a nested guest call returns here
+	rtsStub     = 0x808      // RTS: ends an OS call that ran guest code
 	heapStart   = 0x1000
 	stackSize   = 0x10000
 	superStack  = lowEnd - stackSize // supervisor stack top
@@ -125,6 +125,16 @@ func (m *Machine) warnf(format string, args ...any) {
 	if m.Log != nil {
 		fmt.Fprintf(m.Log, "amiga: "+format+"\n", args...)
 	}
+}
+
+// RAMSize is where guest memory ends. SetFastRAM changes it before New.
+var RAMSize uint32 = fastStart + maxFastRAM
+
+// SetFastRAM sets how much fast RAM the next Machine gets (64 MB to 2 GB).
+// The host reserves it; on Windows it counts as committed memory.
+func SetFastRAM(n uint64) {
+	n = min(max(n, 64<<20), maxFastRAM)
+	RAMSize = fastStart + uint32(n)
 }
 
 // ErrCrash is returned when guest code takes an exception.
@@ -429,7 +439,7 @@ func (m *Machine) Write32(a uint32, v uint32) { m.w32(a, v) }
 
 // Bytes returns n bytes of guest memory at a (a view, not a copy).
 func (m *Machine) Bytes(a, n uint32) []byte {
-	if uint64(a)+uint64(n) > RAMSize {
+	if uint64(a)+uint64(n) > uint64(RAMSize) {
 		return nil
 	}
 	if uint64(a)+uint64(n) > lowEnd && a < fastStart {

@@ -9,8 +9,10 @@ installed.
 
 ## Setting up
 
-1. Put `amiscan` anywhere on your path, e.g. `~/.local/bin/`.
-2. Run `amiscan -update`. It downloads into `~/.local/share/amiscan/libs/`:
+1. Put `amiscan` (Linux) or `amiscan.exe` (Windows) anywhere on your path.
+2. Run `amiscan -update`. It downloads into the parts folder
+   (`~/.local/share/amiscan/libs` on Linux, `%AppData%\AmiScan\libs` on
+   Windows, `~/Library/Application Support/AmiScan/libs` on a Mac):
    - **xvs.library**, the virus database, from the Virus Help Team
      (<https://www.vht-dk.dk/amiga/xvs/xvs.htm>);
    - **xfdmaster.library** and its 103 decrunchers from Aminet
@@ -104,6 +106,8 @@ The first number is the code: **0** pass, **1** virus, **2** corrupted,
 **3** could not check. A file with several problems gets the worst one,
 in that order of badness: virus, corrupted, could not check.
 
+Options may come before or after the file names.
+
 ### Exit status
 
 The worst code over all files, the same four numbers. **3** also when
@@ -111,10 +115,16 @@ AmiScan itself cannot run (no xvs.library, a bad option).
 
 ## Limits
 
-- Files up to 1.5 GB are checked whole (the emulated Amiga has 2 GB of fast
-  RAM; your PC only spends memory on what a file needs, about twice its
-  size while it is checked). Disk images up to 8 GB are opened and their
-  files checked one by one.
+- `-max SIZE` (default 1536M, e.g. `-max 300M`) is the biggest file AmiScan
+  checks or unpacks into; memory use is about twice that at most. Bigger
+  files are reported as not checked, without being read.
+- `-max-total SIZE` (default 8G) is how much one file on disk (an archive, a
+  disk image) may unpack to in all. An archive or disk image itself may be
+  that big; it is read into memory whole, so for a BBS that takes uploads
+  from strangers set both lower, e.g. `-max 300M -max-total 1G`.
+- Archives nested more than 8 deep, and packed programs that would unpack
+  to more than 64 times their size, are not unpacked further (unpacking
+  bombs); that is reported too.
 - A file that is damaged inside its archive (CRC error, data cut short) is
   checked as far as it unpacks, which is what LhA itself would write out.
   The summary counts these; `-v` lists them.

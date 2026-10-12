@@ -72,7 +72,7 @@ func (m *Machine) hostPath(name string) string {
 		}
 		found := ""
 		for _, e := range ents {
-			if strings.EqualFold(e.Name(), part) && (e.Type().IsRegular() || e.IsDir()) {
+			if strings.EqualFold(AmigaName(e.Name()), part) && (e.Type().IsRegular() || e.IsDir()) {
 				found = e.Name()
 				break
 			}
@@ -305,7 +305,7 @@ func (m *Machine) setupDos() {
 }
 
 func (m *Machine) fillFib(fib uint32, st os.FileInfo) {
-	m.fillFibSize(fib, st.Name(), st.Size(), st.ModTime())
+	m.fillFibSize(fib, AmigaName(st.Name()), st.Size(), st.ModTime())
 	if st.IsDir() {
 		m.w32(fib+FileInfoBlock_fib_DirEntryType, 2)
 		m.w32(fib+FileInfoBlock_fib_EntryType, 2)

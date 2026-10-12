@@ -45,7 +45,7 @@ const (
 
 // MaxSize is the largest file handed to xfdmaster (it needs room for the
 // unpacked copy too).
-const MaxSize = 512 << 20
+var MaxSize = 512 << 20
 
 // Decruncher is a loaded xfdmaster.library.
 type Decruncher struct {
@@ -106,7 +106,7 @@ func (x *Decruncher) Decrunch(data []byte) (out []byte, packer string, err error
 	m := x.m
 	// a packed file unpacks to at most 64 times its size here (and 32 MB
 	// is always allowed): broken ones claim gigabytes and would fill them
-	m.AllocLimit = uint32(min(max(int64(len(data))*64, 32<<20), int64(amiga.RAMSize)/2))
+	m.AllocLimit = uint32(min(max(int64(len(data))*64, 32<<20), int64(amiga.RAMSize)/2, int64(MaxSize)))
 	defer func() { m.AllocLimit = 0 }()
 	src := m.Copy(data)
 	if src == 0 {

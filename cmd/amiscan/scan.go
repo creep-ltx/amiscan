@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -46,9 +45,11 @@ type scanner struct {
 // maxLayers is how many times a file packed inside a packed file is unpacked.
 const maxLayers = 5
 
-var limits = diz.Limits{Depth: 8, Total: 8 << 30, File: xvs.MaxFileSize}
-
-const maxTopFile = 8 << 30 // a hard disk image; its files are checked one by one
+// limits are set from -max and -max-total: File is the biggest file checked
+// (and the most one unpacks to), Total what one file on disk may unpack to
+// in all; a file on disk itself may be as big as Total (a hard disk image,
+// whose files are checked one by one).
+var limits = diz.Limits{Depth: 8, Total: 8 << 30, File: 1536 << 20}
 
 func (sc *scanner) add(f finding) {
 	f.Top = sc.top
@@ -68,8 +69,13 @@ func (sc *scanner) scanPath(arg string) {
 		}
 		sc.r.begin(p)
 		defer sc.r.end(p)
-		if info, err := d.Info(); err == nil && info.Size() > maxTopFile {
-			sc.add(finding{Path: p, Kind: "file", Result: resUnchecked, Reason: "bigger than 8 GB"})
+		if info, err := d.Info(); err == nil && info.Size() > limits.Total {
+			sc.add(finding{Path: p, Kind: "file", Result: resUnchecked, Reason: "bigger than " + sizeText(limits.Total) + " (-max-total)"})
+			return nil
+		}
+		if info, err := d.Info(); err == nil && info.Size() > limits.File && !container(p, info.Size()) {
+			// too big to check, and not an archive or disk image: do not read it
+			sc.add(finding{Path: p, Kind: "file", Result: resUnchecked, Reason: "bigger than " + sizeText(limits.File) + " (-max)"})
 			return nil
 		}
 		data, err := os.ReadFile(p)
@@ -90,6 +96,18 @@ func (sc *scanner) scanPath(arg string) {
 		sc.top = arg
 		sc.add(finding{Path: arg, Kind: "file", Result: resUnchecked, Reason: err.Error()})
 	}
+}
+
+// container looks at a file's first 4 KB: is it an archive or disk image?
+func container(path string, size int64) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	head := make([]byte, 4096)
+	n, _ := f.Read(head)
+	return diz.IsContainer(head[:n], size, path)
 }
 
 var fileTypes = map[uint8]string{
@@ -138,7 +156,7 @@ func (sc *scanner) checkBoot(it diz.Item) finding {
 func (sc *scanner) checkFile(path string, data []byte, damaged string) finding {
 	f := finding{Path: path, Kind: "file"}
 	if len(data) > xvs.MaxFileSize {
-		f.Result, f.Reason = resUnchecked, fmt.Sprintf("bigger than %d MB, too big for the emulated Amiga", xvs.MaxFileSize>>20)
+		f.Result, f.Reason = resUnchecked, "bigger than "+sizeText(int64(xvs.MaxFileSize))+" (-max)"
 		return f
 	}
 	res, err := sc.s.CheckFile(data)

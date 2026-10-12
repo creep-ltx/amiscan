@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/creep-ltx/amiscan/internal/amiga"
 	"github.com/creep-ltx/amiscan/internal/diz/lha"
 	_ "golang.org/x/crypto/x509roots/fallback" // HTTPS works even without system certificates
 )
@@ -392,7 +393,7 @@ func unpack(src *Source, archive []byte) (files map[string][]byte, signed bool, 
 			if err != nil {
 				return nil, false, fmt.Errorf("%s: %w", rel, err)
 			}
-			files[dir+"/"+name] = data
+			files[dir+"/"+amiga.HostName(name)] = data
 			n++
 		}
 		if n == 0 {

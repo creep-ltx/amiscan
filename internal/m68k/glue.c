@@ -1,6 +1,10 @@
 #include "glue.h"
 #include "musashi/m68k.h"
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <sys/mman.h>
+#endif
 
 uint8_t *amiscan_ram;
 uint32_t amiscan_ram_size;
@@ -63,16 +67,41 @@ unsigned int m68k_read_disassembler_32(unsigned int a) { return m68k_read_memory
 static int illg(int opcode) { return goIllegal(opcode); }
 
 // RAM is reserved address space: the host only spends memory on the
-// pages the guest touches, and amiscan_discard gives them back.
+// pages the guest touches, and amiscan_discard gives them back (the
+// guest then reads zeros there).
+#ifdef _WIN32
+uint8_t *amiscan_map_ram(uint32_t size) {
+	// committed pages are zero and only become real memory when touched
+	return VirtualAlloc(0, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+}
+
+void amiscan_discard(uint32_t addr, uint32_t len) {
+	uint64_t page = 4096, lo = ((uint64_t)addr + page - 1) & ~(page - 1), hi = ((uint64_t)addr + len) & ~(page - 1);
+	if (hi > lo && hi <= amiscan_ram_size) {
+		VirtualFree(amiscan_ram + lo, hi - lo, MEM_DECOMMIT);
+		VirtualAlloc(amiscan_ram + lo, hi - lo, MEM_COMMIT, PAGE_READWRITE);
+	}
+}
+#else
+#ifndef MAP_NORESERVE
+#define MAP_NORESERVE 0
+#endif
+#ifndef MAP_ANONYMOUS
+#define MAP_ANONYMOUS MAP_ANON
+#endif
 uint8_t *amiscan_map_ram(uint32_t size) {
 	void *p = mmap(0, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
 	return p == MAP_FAILED ? 0 : p;
 }
 
 void amiscan_discard(uint32_t addr, uint32_t len) {
+	// fresh zero pages over the range: madvise(MADV_DONTNEED) would do on
+	// Linux, but on macOS it does not promise zeros
 	uint64_t page = 4096, lo = ((uint64_t)addr + page - 1) & ~(page - 1), hi = ((uint64_t)addr + len) & ~(page - 1);
-	if (hi > lo && hi <= amiscan_ram_size) madvise(amiscan_ram + lo, hi - lo, MADV_DONTNEED);
+	if (hi > lo && hi <= amiscan_ram_size)
+		mmap(amiscan_ram + lo, hi - lo, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, -1, 0);
 }
+#endif
 
 void amiscan_init(uint8_t *ram, uint32_t size, int cpu_type) {
 	amiscan_ram = ram;

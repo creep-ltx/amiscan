@@ -2,6 +2,7 @@ package amiga
 
 import (
 	"encoding/binary"
+	"strings"
 	"testing"
 )
 
@@ -127,5 +128,17 @@ func TestRawDoFmt(t *testing.T) {
 	got, next := m.rawDoFmt(fmtStr, data)
 	if want := "compressors/xpkNUKE.library -2 100000 00ab NUKE |Z"; got != want || next != data+18 {
 		t.Fatalf("got %q next +%d, want %q +18", got, next-data, want)
+	}
+}
+
+func TestHostNames(t *testing.T) {
+	for _, n := range []string{"Ace?", "plain", "100%", "a:b*c", "ÅÄÖ!"} {
+		h := HostName(n)
+		if strings.ContainsAny(h, `<>:"\|?*`) || AmigaName(h) != n {
+			t.Errorf("%q -> %q -> %q", n, h, AmigaName(h))
+		}
+	}
+	if HostName("NUKE") != "NUKE" {
+		t.Error("plain names must not change")
 	}
 }

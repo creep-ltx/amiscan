@@ -99,6 +99,27 @@ Unpacking cap: while xfd runs, one AllocMem may be at most 64 x the packed size
 the collection) made xfdmaster fill gigabytes of the 2 GB fast RAM: a whole scan
 went from 1.4 s to 6.5 s. With 12 MB of RAM it had simply failed.
 
+## Memory limits, Windows (2026-10-12)
+
+`-max` sets xvs.MaxFileSize, xfd.MaxSize (at most 512 MB), diz Limits.File and
+the guest fast RAM (2 x max + 64 MB, at most 2 GB; `amiga.SetFastRAM` before
+`amiga.New`). A file over -max whose first 4 KB is not an archive or disk image
+(`diz.IsContainer`) is reported without being read: a 700 MB file with -max 300M
+peaks at 123 MB instead of 786 MB. `-max-total` caps what one file on disk unpacks
+to and its own size. Options may follow file names (`optionsFirst`); a bad option
+exits 3, not the flag package's 2 (which means "corrupted" here).
+
+Windows: `make amiscan.exe` with MinGW (pacman mingw-w64-gcc), static. Guest RAM
+is VirtualAlloc(MEM_RESERVE|MEM_COMMIT): it counts as committed memory on Windows
+(hence sizing it from -max); discard is MEM_DECOMMIT + MEM_COMMIT. On POSIX discard
+maps fresh zero pages with mmap(MAP_FIXED) (macOS's MADV_DONTNEED does not promise
+zeros). Amiga names with Windows-forbidden characters (xfd's decruncher "Ace?") are
+stored as %XX (`amiga.HostName`/`AmigaName`) on every host. Parts folder: XDG on
+Linux, os.UserConfigDir()/AmiScan/libs on Windows and macOS. Verified under Wine 2026-10-12: -update
+installs all four parts; the virus collection gives the same verdict as Linux for
+all 3,102 items. Not yet run on real Windows. macOS: not built yet (needs a Mac or
+GitHub's macOS runners; see Knowledge/macos/).
+
 ## Damaged archives (2026-10-12)
 
 On the user's 61,859-file BBS door collection 255 items were "not checked": 165

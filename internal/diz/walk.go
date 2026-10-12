@@ -168,3 +168,11 @@ func bootBlock(format string, data []byte) []byte {
 	}
 	return nil
 }
+
+// IsContainer reports whether a file with this start (up to 4 KB), size
+// and name is an archive or disk image Walk would open.
+func IsContainer(head []byte, size int64, name string) bool {
+	ext := strings.ToLower(strings.TrimPrefix(path.Ext(name), "."))
+	f := detectContent(head[:min(len(head), headSize)], size, ext)
+	return f != nil && f.name != "amigaexe"
+}

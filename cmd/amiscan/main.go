@@ -13,7 +13,9 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"runtime/pprof"
+	"strconv"
 	"strings"
 	"time"
 
@@ -78,6 +80,8 @@ func main() {
 	showList := flag.String("show", "virus,damaged,unchecked", "what the report lists: virus, damaged, unchecked, clean, all or none")
 	verbose := flag.Bool("v", false, "list the clean files too (same as -show all)")
 	quiet := flag.Bool("q", false, "only the summary line (same as -show none)")
+	maxSize := flag.String("max", "1536M", "biggest file checked or unpacked into, e.g. 300M; memory use is about twice this")
+	maxTotal := flag.String("max-total", "8G", "most one file on disk may unpack to in all (and its own biggest size)")
 	outFile := flag.String("o", "", "write the report to this file; .txt, .md, .html or .json picks the format")
 	format := flag.String("format", "", "report format: text, markdown, html, json or bbs (default: from -o's extension, else text)")
 	list := flag.Bool("list", false, "list the viruses xvs.library knows")
@@ -87,7 +91,15 @@ func main() {
 	force := flag.Bool("force", false, "with -update: download even when nothing changed")
 	checkLib := flag.String("check-library", "", "") // internal: load one library from -libs, print its version
 	flag.Usage = usage
-	flag.Parse()
+	// a bad option exits 3 (AmiScan could not run), not the flag package's 2,
+	// which means "corrupted" here
+	flag.CommandLine.Init(os.Args[0], flag.ContinueOnError)
+	if err := flag.CommandLine.Parse(optionsFirst(os.Args[1:])); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(codePass)
+		}
+		os.Exit(codeUnchecked)
+	}
 	if p := os.Getenv("AMISCAN_CPUPROFILE"); p != "" { // developers: where the time goes
 		if f, err := os.Create(p); err == nil {
 			pprof.StartCPUProfile(f)
@@ -100,6 +112,10 @@ func main() {
 	}
 	if *doUpdate {
 		os.Exit(runUpdate(*libs, *force))
+	}
+	if err := setLimits(*maxSize, *maxTotal); err != nil {
+		fmt.Fprintln(os.Stderr, "amiscan:", err)
+		os.Exit(codeUnchecked)
 	}
 	dir, err := findLibs(*libs)
 	if err != nil {
@@ -433,6 +449,100 @@ func showVersions(m *amiga.Machine, dir string, s *xvs.Scanner, dec *xfd.Decrunc
 	}
 }
 
+// optionsFirst moves options before the file names, so that
+// "amiscan upload.lha -bbs" works as well as "amiscan -bbs upload.lha".
+// After "--" everything is a file name.
+func optionsFirst(args []string) []string {
+	var opts, names []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			names = append(names, args[i+1:]...)
+			break
+		}
+		if !strings.HasPrefix(a, "-") || a == "-" {
+			names = append(names, a)
+			continue
+		}
+		opts = append(opts, a)
+		name := strings.TrimLeft(a, "-")
+		if strings.Contains(name, "=") {
+			continue
+		}
+		f := flag.Lookup(name)
+		if f == nil {
+			continue // unknown: the flag package says so
+		}
+		if b, ok := f.Value.(interface{ IsBoolFlag() bool }); !(ok && b.IsBoolFlag()) && i+1 < len(args) {
+			i++
+			opts = append(opts, args[i]) // the option's value
+		}
+	}
+	return append(append(opts, "--"), names...)
+}
+
+// parseSize reads 300M, 1.5G, 64K or a number of bytes.
+func parseSize(s string) (int64, error) {
+	t := strings.ToUpper(strings.TrimSpace(s))
+	t = strings.TrimSuffix(strings.TrimSuffix(t, "B"), "I")
+	mult := int64(1)
+	if t != "" {
+		switch t[len(t)-1] {
+		case 'K':
+			mult = 1 << 10
+		case 'M':
+			mult = 1 << 20
+		case 'G':
+			mult = 1 << 30
+		}
+		if mult > 1 {
+			t = t[:len(t)-1]
+		}
+	}
+	v, err := strconv.ParseFloat(t, 64)
+	if err != nil || v <= 0 {
+		return 0, fmt.Errorf("%q is not a size (like 300M or 1.5G)", s)
+	}
+	return int64(v * float64(mult)), nil
+}
+
+func sizeText(n int64) string {
+	switch {
+	case n >= 1<<30 && n%(1<<30) == 0:
+		return fmt.Sprintf("%d GB", n>>30)
+	case n >= 1<<20:
+		return fmt.Sprintf("%d MB", n>>20)
+	default:
+		return fmt.Sprintf("%d KB", n>>10)
+	}
+}
+
+// setLimits applies -max and -max-total, and sizes the emulated Amiga's
+// fast RAM to fit: a file, the copy xfd unpacks it into, and room to work.
+func setLimits(maxS, totalS string) error {
+	maxB, err := parseSize(maxS)
+	if err != nil {
+		return fmt.Errorf("-max: %w", err)
+	}
+	total, err := parseSize(totalS)
+	if err != nil {
+		return fmt.Errorf("-max-total: %w", err)
+	}
+	const ceiling = 1536 << 20 // what 2 GB of fast RAM holds with room to work
+	if maxB > ceiling {
+		return fmt.Errorf("-max: at most %s (the emulated Amiga has 2 GB)", sizeText(ceiling))
+	}
+	if maxB < 1<<20 {
+		return errors.New("-max: at least 1M")
+	}
+	total = max(total, maxB)
+	xvs.MaxFileSize = int(maxB)
+	xfd.MaxSize = int(min(maxB, 512<<20))
+	limits.File, limits.Total = maxB, total
+	amiga.SetFastRAM(uint64(maxB)*2 + 64<<20)
+	return nil
+}
+
 // parseShow reads the -show list.
 func parseShow(list string) (map[string]bool, error) {
 	show := map[string]bool{}
@@ -464,19 +574,30 @@ func defaultLibs() []string {
 	if d := os.Getenv("AMISCAN_LIBS"); d != "" {
 		dirs = append(dirs, d)
 	}
-	data := os.Getenv("XDG_DATA_HOME")
-	if data == "" {
-		if home, err := os.UserHomeDir(); err == nil {
-			data = filepath.Join(home, ".local", "share")
+	switch runtime.GOOS {
+	case "windows", "darwin":
+		// %AppData%\AmiScan\libs, ~/Library/Application Support/AmiScan/libs
+		if d, err := os.UserConfigDir(); err == nil {
+			dirs = append(dirs, filepath.Join(d, "AmiScan", "libs"))
 		}
-	}
-	if data != "" {
-		dirs = append(dirs, filepath.Join(data, "amiscan", "libs"))
+	default:
+		data := os.Getenv("XDG_DATA_HOME")
+		if data == "" {
+			if home, err := os.UserHomeDir(); err == nil {
+				data = filepath.Join(home, ".local", "share")
+			}
+		}
+		if data != "" {
+			dirs = append(dirs, filepath.Join(data, "amiscan", "libs"))
+		}
 	}
 	if exe, err := os.Executable(); err == nil {
 		dirs = append(dirs, filepath.Join(filepath.Dir(exe), "libs"))
 	}
-	return append(dirs, "/usr/local/share/amiscan/libs", "/usr/share/amiscan/libs")
+	if runtime.GOOS != "windows" {
+		dirs = append(dirs, "/usr/local/share/amiscan/libs", "/usr/share/amiscan/libs")
+	}
+	return dirs
 }
 
 func findLibs(flagDir string) (string, error) {

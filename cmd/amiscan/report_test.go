@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"flag"
+	"strings"
+	"testing"
+)
 
 func TestVerdictAndCodes(t *testing.T) {
 	top := "UP.LHA"
@@ -46,5 +50,17 @@ func TestParseShow(t *testing.T) {
 func TestUniform(t *testing.T) {
 	if !uniform(nil) || !uniform(make([]byte, 1000)) || uniform([]byte{0, 0, 1}) {
 		t.Fatal("uniform is wrong")
+	}
+}
+
+func TestOptionsFirst(t *testing.T) {
+	// main registers the real options; these two stand in for them
+	if flag.Lookup("max") == nil {
+		flag.String("max", "", "")
+		flag.Bool("bbs", false, "")
+	}
+	got := strings.Join(optionsFirst([]string{"up.lha", "-max", "300M", "-bbs", "-o=r.html", "two.lha", "-bogus", "--", "-name"}), " ")
+	if want := "-max 300M -bbs -o=r.html -bogus -- up.lha two.lha -name"; got != want {
+		t.Fatalf("got %q\nwant %q", got, want)
 	}
 }
