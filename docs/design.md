@@ -87,6 +87,13 @@ GetTagData, ...; 32/64-bit math), exec `RawDoFmt` (it builds
 any other is called per character in steps) and intuition `CurrentTime`. A NUKE
 file from the user's doors unpacks to the 6,344 bytes its XPK header promises.
 
+Passwords (verified 2026-10-12, `TestXPKPasswordAndRoundTrip`): XpkPack run inside
+the emulator with each of the 16 xpk_User packers; every one round-trips exactly
+through AmiScan's unpacking. DLTA, HUFF and SQSH can encrypt (XPKIF_ENCRYPTION);
+packed with a password, xfd calls them "XPK Crypted" with XFDPFF_PASSWORD, so they
+are reported "needs a password to unpack", NOT CHECKED, exit 2. xpkmaster's password
+window never opens (gadtools is a stand-in), so nothing can hang waiting for input.
+
 Unpacking cap: while xfd runs, one AllocMem may be at most 64 x the packed size
 (at least 32 MB). Without it a damaged Crunch 1.3 file (an Ebola-infected one in
 the collection) made xfdmaster fill gigabytes of the 2 GB fast RAM: a whole scan
