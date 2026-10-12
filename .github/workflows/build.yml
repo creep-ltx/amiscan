@@ -78,3 +78,4 @@ jobs:
         with:
           files: amiscan-*.*z*
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, 'b') }} # 0.1b1 is a beta
