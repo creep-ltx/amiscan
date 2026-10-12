@@ -67,7 +67,9 @@ type Machine struct {
 // New sets up the machine. Only one Machine may exist per process.
 func New(libsDir string) *Machine {
 	m := &Machine{LibsDir: libsDir, Log: os.Stderr}
-	m.CPU = m68k.New(RAMSize, m68k.CPU68000, m.trap)
+	// A 68020 (on a 24-bit bus, like an A1200's): runs all 68000 code, and
+	// some xfd decrunchers need 020 instructions.
+	m.CPU = m68k.New(RAMSize, m68k.CPU68020, m.trap)
 	m.heap.init(heapStart, heapEnd)
 	m.files.init()
 	c := m.CPU
@@ -82,6 +84,11 @@ func New(libsDir string) *Machine {
 	m.libs = append(m.libs, nil) // index 0 unused
 	m.setupExec()
 	m.setupDos()
+	// Amiga libraries look for these; every call to them returns 0.
+	m.AddFakeDevice("trackdisk.device")
+	m.AddFakeLibrary("intuition.library", 40)
+	m.AddFakeLibrary("utility.library", 40)
+	m.AddFakeLibrary("graphics.library", 40)
 	return m
 }
 
@@ -325,3 +332,6 @@ func (m *Machine) Latin1String(a uint32) string {
 	}
 	return string(r)
 }
+
+// Write16 stores a word in guest memory.
+func (m *Machine) Write16(a uint32, v uint16) { m.w16(a, v) }

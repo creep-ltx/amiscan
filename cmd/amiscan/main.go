@@ -17,8 +17,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/creep-ltx/amiscan/internal/amiga"
 	"github.com/creep-ltx/amiscan/internal/diz"
 	"github.com/creep-ltx/amiscan/internal/update"
+	"github.com/creep-ltx/amiscan/internal/xfd"
 	"github.com/creep-ltx/amiscan/internal/xvs"
 )
 
@@ -64,9 +66,13 @@ func main() {
 	showVersion := flag.Bool("version", false, "show the versions")
 	doUpdate := flag.Bool("update", false, "download the newest xvs.library (and any key files it needs)")
 	force := flag.Bool("force", false, "with -update: download even when nothing changed")
+	checkLib := flag.String("check-library", "", "") // internal: load one library from -libs, print its version
 	flag.Usage = usage
 	flag.Parse()
 
+	if *checkLib != "" {
+		os.Exit(checkLibrary(*libs, *checkLib))
+	}
 	if *doUpdate {
 		os.Exit(runUpdate(*libs, *force))
 	}
@@ -76,7 +82,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, `Run "amiscan -update" to download it.`)
 		os.Exit(exitTrouble)
 	}
-	s, err := xvs.Open(dir)
+	m := amiga.New(dir)
+	s, err := xvs.Open(m)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "amiscan:", err)
 		os.Exit(exitTrouble)
@@ -86,9 +93,26 @@ func main() {
 		fmt.Fprintf(os.Stderr, "amiscan: xvs.library failed its self test (%v); download it again from %s\n", err, xvsURL)
 		os.Exit(exitTrouble)
 	}
+	// xfdmaster.library is optional: without it packed programs are checked
+	// as they are
+	var dec *xfd.Decruncher
+	xfdNote := ""
+	if _, err := os.Stat(filepath.Join(dir, "xfdmaster.library")); err == nil {
+		if dec, err = xfd.Open(m); err != nil {
+			fmt.Fprintln(os.Stderr, "amiscan: xfdmaster.library:", err)
+			os.Exit(exitTrouble)
+		}
+	} else {
+		xfdNote = `xfdmaster.library not installed: packed programs are not unpacked ("amiscan -update" fetches it)`
+	}
 	switch {
 	case *showVersion:
 		fmt.Printf("AmiScan %s\n%s in %s\n", version, s.IDString, dir)
+		if dec != nil {
+			fmt.Println(dec.IDString)
+		} else {
+			fmt.Println(xfdNote)
+		}
 		return
 	case *list:
 		os.Exit(listViruses(s))
@@ -97,9 +121,12 @@ func main() {
 		usage()
 		os.Exit(exitTrouble)
 	}
-	r := &reporter{s: s, json: *jsonOut, verbose: *verbose, start: time.Now()}
+	r := &reporter{s: s, dec: dec, json: *jsonOut, verbose: *verbose, start: time.Now()}
 	if !r.json {
 		fmt.Printf("AmiScan %s with %s\n", version, s.IDString)
+		if xfdNote != "" {
+			fmt.Fprintln(os.Stderr, "amiscan: "+xfdNote)
+		}
 		if t := update.LastChecked(dir, update.XVS.Name); !t.IsZero() && time.Since(t) > 30*24*time.Hour {
 			fmt.Fprintf(os.Stderr, "amiscan: no update check for %d days; run \"amiscan -update\"\n", int(time.Since(t).Hours()/24))
 		}
@@ -128,39 +155,82 @@ func runUpdate(flagDir string, force bool) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	u := &update.Updater{Dir: dir, Log: func(s string) { fmt.Println("  " + s) }}
-	update.XVS.Version = xvsVersion
+	update.XVS.Version = libraryVersion("xvs.library")
+	update.XFD.Version = libraryVersion("xfdmaster.library")
 	fmt.Printf("Updating %s\n", dir)
-	results, err := u.Update(ctx, update.XVS, force)
-	for _, r := range results {
-		fmt.Println(r)
+	code := exitClean
+	for _, src := range []*update.Source{update.XVS, update.XFD} {
+		results, err := u.Update(ctx, src, force)
+		for _, r := range results {
+			fmt.Println(r)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "amiscan:", err)
+			code = exitTrouble
+		}
 	}
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "amiscan:", err)
+	return code
+}
+
+// checkLibrary loads one library from dir in a fresh emulated Amiga and
+// prints its id string; xvs.library must also pass its self test.
+func checkLibrary(dir, name string) int {
+	m := amiga.New(dir)
+	m.Log = nil
+	var id string
+	switch name {
+	case "xvs.library":
+		s, err := xvs.Open(m)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return exitTrouble
+		}
+		if ok, err := s.SelfTest(); !ok || err != nil {
+			fmt.Fprintln(os.Stderr, "self test failed", err)
+			return exitTrouble
+		}
+		id = s.IDString
+	case "xfdmaster.library":
+		d, err := xfd.Open(m)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return exitTrouble
+		}
+		if out, _, _ := d.Decrunch(make([]byte, 64)); out != nil {
+			fmt.Fprintln(os.Stderr, "xfdmaster unpacks zeros: broken")
+			return exitTrouble
+		}
+		id = d.IDString
+	default:
+		fmt.Fprintln(os.Stderr, "unknown library", name)
 		return exitTrouble
 	}
+	fmt.Println(id)
 	return exitClean
 }
 
-var xvsVersionRe = regexp.MustCompile(`xvs (\d+\.\d+ \([^)]*\))`)
+var idVersionRe = regexp.MustCompile(`\d+\.\d+ \([^)]*\)`)
 
-// xvsVersion starts a second amiscan on the library in dir: it must load
-// and pass its self test (one emulated Amiga per process, so not in this one).
-func xvsVersion(dir string) (string, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return "", err
+// libraryVersion checks a library in a second amiscan (one emulated Amiga
+// per process) and returns its version, e.g. "33.49 (11.04.2025)".
+func libraryVersion(name string) func(dir string) (string, error) {
+	return func(dir string) (string, error) {
+		exe, err := os.Executable()
+		if err != nil {
+			return "", err
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		out, err := exec.CommandContext(ctx, exe, "-libs", dir, "-check-library", name).CombinedOutput()
+		if err != nil {
+			return "", fmt.Errorf("%s", strings.TrimSpace(string(out)))
+		}
+		v := idVersionRe.FindString(string(out))
+		if v == "" {
+			return "", fmt.Errorf("no version in %q", out)
+		}
+		return v, nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, exe, "-libs", dir, "-version").CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("%s", strings.TrimSpace(string(out)))
-	}
-	m := xvsVersionRe.FindStringSubmatch(string(out))
-	if m == nil {
-		return "", fmt.Errorf("no version in %q", out)
-	}
-	return m[1], nil
 }
 
 // defaultLibs are the folders searched for xvs.library, in order.
@@ -230,12 +300,16 @@ type finding struct {
 
 type reporter struct {
 	s       *xvs.Scanner
+	dec     *xfd.Decruncher // nil without xfdmaster.library
 	json    bool
 	verbose bool
 	start   time.Time
 
-	files, boots, viruses, skipped, errs int
+	files, boots, unpacked, viruses, skipped, errs int
 }
+
+// maxLayers is how many times a file packed inside a packed file is unpacked.
+const maxLayers = 5
 
 var limits = diz.Limits{Depth: 6, Total: 1 << 30, File: 256 << 20}
 
@@ -305,7 +379,46 @@ func (r *reporter) check(it diz.Item) error {
 		f.Result, f.Type = "clean", fileTypes[res.Type]
 	}
 	r.report(f)
+	r.unpack(it, 0, f.Result == "virus")
 	return nil
+}
+
+// unpack decrunches a packed file with xfdmaster and checks what is inside.
+// A file already found infected is not reported again when it will not
+// unpack: a link virus usually breaks the packed file's structure.
+func (r *reporter) unpack(it diz.Item, layer int, infected bool) {
+	if r.dec == nil || layer >= maxLayers {
+		return
+	}
+	out, packer, err := r.dec.Decrunch(it.Data)
+	if err != nil && infected {
+		return
+	}
+	inside := it.Path + " (packed contents)"
+	switch {
+	case errors.Is(err, xfd.ErrLocked):
+		r.report(finding{Path: inside, Kind: "file", Result: "skipped", Detail: packer + " needs a password to unpack"})
+		return
+	case err != nil:
+		r.report(finding{Path: inside, Kind: "file", Result: "skipped", Detail: packer + " will not unpack: " + err.Error()})
+		return
+	case out == nil:
+		return
+	}
+	r.unpacked++
+	inner := diz.Item{Path: it.Path + " (unpacked " + packer + ")", Data: out}
+	f := finding{Path: inner.Path, Kind: "file"}
+	res, err := r.s.CheckFile(out)
+	switch {
+	case err != nil:
+		f.Result, f.Detail = "error", err.Error()
+	case res.Infected():
+		f.Result, f.Virus, f.Type = "virus", res.Name, fileTypes[res.Type]
+	default:
+		f.Result, f.Type = "clean", fileTypes[res.Type]
+	}
+	r.report(f)
+	r.unpack(inner, layer+1, f.Result == "virus")
 }
 
 func (r *reporter) report(f finding) {
@@ -334,7 +447,7 @@ func (r *reporter) report(f finding) {
 	case "error":
 		fmt.Printf("%s: ERROR %s\n", f.Path, f.Detail)
 	case "skipped":
-		fmt.Printf("%s: not checked, %s\n", f.Path, f.Detail)
+		fmt.Printf("%s: NOT CHECKED, %s\n", f.Path, f.Detail)
 	default:
 		if r.verbose {
 			fmt.Printf("%s: ok (%s)\n", f.Path, strings.ToLower(f.Type))
@@ -353,7 +466,7 @@ func (r *reporter) finish() int {
 	}
 	if r.json {
 		b, _ := json.Marshal(map[string]any{
-			"summary": true, "files": r.files, "bootblocks": r.boots, "viruses": r.viruses,
+			"summary": true, "files": r.files, "bootblocks": r.boots, "unpacked": r.unpacked, "viruses": r.viruses,
 			"skipped": r.skipped, "errors": r.errs, "seconds": took.Seconds(), "exit": code,
 		})
 		fmt.Println(string(b))
@@ -371,7 +484,11 @@ func (r *reporter) finish() int {
 		}
 		return fmt.Sprintf("%d %s", n, many)
 	}
-	fmt.Printf("Checked %s and %s in %s: %s", plural(r.files, "file", "files"), plural(r.boots, "boot block", "boot blocks"), took, verdict)
+	unpacked := ""
+	if r.unpacked > 0 {
+		unpacked = fmt.Sprintf(" (%d of them unpacked)", r.unpacked)
+	}
+	fmt.Printf("Checked %s%s and %s in %s: %s", plural(r.files, "file", "files"), unpacked, plural(r.boots, "boot block", "boot blocks"), took, verdict)
 	if r.skipped+r.errs > 0 {
 		fmt.Printf(", %d not checked", r.skipped+r.errs)
 	}

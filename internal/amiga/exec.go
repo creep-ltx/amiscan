@@ -59,6 +59,7 @@ func (m *Machine) setupExec() {
 	m.w32(4, sb)
 	m.w16(sb+Library_lib_Revision, 68)
 	m.w16(sb+ExecBase_SoftVer, 68)
+	m.w16(sb+ExecBase_AttnFlags, 0x0003) // AFF_68010 | AFF_68020
 	m.w8(sb+ExecBase_IDNestCnt, 0xff)
 	m.w8(sb+ExecBase_TDNestCnt, 0xff)
 	m.w8(sb+ExecBase_VBlankFrequency, 50)

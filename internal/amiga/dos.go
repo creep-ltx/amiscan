@@ -23,40 +23,66 @@ type openFile struct {
 	pos  int
 }
 
+type lock struct {
+	path    string
+	entries []os.DirEntry // for ExNext, read at Examine
+}
+
 type files struct {
-	locks   map[uint32]string // lock address -> host path
+	locks   map[uint32]*lock // lock address -> what it is
 	handles map[uint32]*openFile
 	ioErr   uint32
+	cwd     string // host path of the current directory, "" = none
+	cwdLock uint32 // BPTR given by CurrentDir
 }
 
 func (f *files) init() {
-	f.locks = map[uint32]string{}
+	f.locks = map[uint32]*lock{}
 	f.handles = map[uint32]*openFile{}
 }
 
-// hostPath maps an Amiga path to a file in LibsDir; only LIBS: is visible.
+// hostPath maps an Amiga path to a file under LibsDir. Only LIBS: (and
+// paths relative to a current directory inside it) are visible; each part
+// is matched without regard to case, as on the Amiga, and must exist.
 func (m *Machine) hostPath(name string) string {
-	dev, rest, ok := strings.Cut(name, ":")
-	if !ok || !strings.EqualFold(dev, "LIBS") || m.LibsDir == "" {
+	if m.LibsDir == "" {
 		return ""
 	}
-	rest = strings.TrimPrefix(rest, "/")
-	if rest == "" {
-		return m.LibsDir
-	}
-	if strings.Contains(rest, "/") {
-		return ""
-	}
-	ents, err := os.ReadDir(m.LibsDir)
-	if err != nil {
-		return ""
-	}
-	for _, e := range ents { // Amiga names are case-insensitive
-		if strings.EqualFold(e.Name(), rest) {
-			return filepath.Join(m.LibsDir, e.Name())
+	base, rest := m.files.cwd, name
+	if dev, after, ok := strings.Cut(name, ":"); ok {
+		if !strings.EqualFold(dev, "LIBS") {
+			return ""
 		}
+		base, rest = m.LibsDir, after
 	}
-	return ""
+	if base == "" {
+		return ""
+	}
+	p := base
+	for _, part := range strings.Split(rest, "/") {
+		if part == "" || part == "." || part == ".." {
+			if part == "" && rest == "" {
+				break
+			}
+			return "" // "/" (parent) and empty parts are not allowed
+		}
+		ents, err := os.ReadDir(p)
+		if err != nil {
+			return ""
+		}
+		found := ""
+		for _, e := range ents {
+			if strings.EqualFold(e.Name(), part) && (e.Type().IsRegular() || e.IsDir()) {
+				found = e.Name()
+				break
+			}
+		}
+		if found == "" {
+			return ""
+		}
+		p = filepath.Join(p, found)
+	}
+	return p
 }
 
 func (m *Machine) setupDos() {
@@ -72,8 +98,72 @@ func (m *Machine) setupDos() {
 	f["Output"] = func() { ret(0) }
 	f["Input"] = func() { ret(0) }
 	f["Delay"] = func() {}
+	f["Info"] = func() { ret(0) }
+	f["NameFromLock"] = func() {
+		l, ok := fs.locks[d(1)<<2]
+		if !ok || d(3) == 0 {
+			ret(0)
+			return
+		}
+		rel, _ := filepath.Rel(m.LibsDir, l.path)
+		name := "LIBS:"
+		if rel != "." {
+			name += filepath.ToSlash(rel)
+		}
+		if uint32(len(name)) >= d(3) {
+			ret(0)
+			return
+		}
+		copy(m.CPU.RAM[d(2):], name+"\x00")
+		ret(0xffffffff)
+	}
 	f["DateStamp"] = func() { m.putDate(d(1), time.Now()); ret(d(1)) }
-	f["CurrentDir"] = func() { ret(0) }
+	f["CurrentDir"] = func() {
+		old := fs.cwdLock
+		fs.cwdLock = d(1)
+		if l, ok := fs.locks[d(1)<<2]; ok {
+			fs.cwd = l.path
+		} else {
+			fs.cwd = ""
+		}
+		ret(old)
+	}
+	newLock := func(p string, access uint32) uint32 {
+		l := m.Alloc(20, true)
+		m.w32(l+8, access) // fl_Access
+		fs.locks[l] = &lock{path: p}
+		return l >> 2
+	}
+	f["ParentDir"] = func() {
+		l, ok := fs.locks[d(1)<<2]
+		if !ok || filepath.Clean(l.path) == filepath.Clean(m.LibsDir) {
+			fail(errObjectNotFound)
+			return
+		}
+		ret(newLock(filepath.Dir(l.path), 0xfffffffe))
+	}
+	f["LoadSeg"] = func() {
+		p := m.hostPath(m.CString(d(1)))
+		if p == "" {
+			fail(errObjectNotFound)
+			return
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			fail(errObjectNotFound)
+			return
+		}
+		seg, _, err := m.LoadSeg(data)
+		if err != nil {
+			if m.Trace {
+				m.warnf("LoadSeg(%q): %v", m.CString(d(1)), err)
+			}
+			fail(121) // ERROR_FILE_NOT_OBJECT
+			return
+		}
+		ret(seg)
+	}
+	f["UnLoadSeg"] = func() { m.UnLoadSeg(d(1)); ret(0xffffffff) }
 	f["Lock"] = func() {
 		p := m.hostPath(m.CString(d(1)))
 		if p == "" {
@@ -84,20 +174,15 @@ func (m *Machine) setupDos() {
 			fail(errObjectNotFound)
 			return
 		}
-		l := m.Alloc(20, true)
-		m.w32(l+8, d(2)) // fl_Access
-		fs.locks[l] = p
-		ret(l >> 2)
+		ret(newLock(p, d(2)))
 	}
 	f["DupLock"] = func() {
-		p, ok := fs.locks[d(1)<<2]
+		l, ok := fs.locks[d(1)<<2]
 		if !ok {
 			ret(0)
 			return
 		}
-		l := m.Alloc(20, true)
-		fs.locks[l] = p
-		ret(l >> 2)
+		ret(newLock(l.path, 0xfffffffe))
 	}
 	f["UnLock"] = func() {
 		l := d(1) << 2
@@ -107,20 +192,49 @@ func (m *Machine) setupDos() {
 		}
 	}
 	f["Examine"] = func() {
-		p, ok := fs.locks[d(1)<<2]
+		l, ok := fs.locks[d(1)<<2]
 		if !ok {
 			fail(errObjectNotFound)
 			return
 		}
-		st, err := os.Stat(p)
+		st, err := os.Stat(l.path)
 		if err != nil {
 			fail(errObjectNotFound)
 			return
 		}
+		if st.IsDir() {
+			l.entries = nil
+			ents, _ := os.ReadDir(l.path)
+			for _, e := range ents {
+				if e.Type().IsRegular() || e.IsDir() {
+					l.entries = append(l.entries, e)
+				}
+			}
+		}
 		m.fillFib(d(2), st)
+		m.w32(d(2)+FileInfoBlock_fib_DiskKey, 0) // ExNext's position
 		ret(0xffffffff)
 	}
-	f["ExNext"] = func() { fail(errNoMoreEntries) }
+	f["ExNext"] = func() {
+		l, ok := fs.locks[d(1)<<2]
+		fib := d(2)
+		if !ok {
+			fail(errObjectNotFound)
+			return
+		}
+		i := m.r32(fib + FileInfoBlock_fib_DiskKey)
+		for ; int(i) < len(l.entries); i++ {
+			st, err := l.entries[i].Info()
+			if err != nil {
+				continue
+			}
+			m.fillFib(fib, st)
+			m.w32(fib+FileInfoBlock_fib_DiskKey, i+1)
+			ret(0xffffffff)
+			return
+		}
+		fail(errNoMoreEntries)
+	}
 	f["Open"] = func() {
 		p := m.hostPath(m.CString(d(1)))
 		if p == "" || d(2) != 1005 { // MODE_OLDFILE only

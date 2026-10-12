@@ -2,6 +2,8 @@ package xvs
 
 import (
 	"os"
+
+	"github.com/creep-ltx/amiscan/internal/amiga"
 	"path/filepath"
 	"testing"
 )
@@ -17,7 +19,7 @@ func open(t *testing.T) *Scanner {
 		t.Skip("AMISCAN_LIBS not set: no xvs.library to test with")
 	}
 	if scanner == nil {
-		s, err := Open(dir)
+		s, err := Open(amiga.New(dir))
 		if err != nil {
 			t.Fatal(err)
 		}

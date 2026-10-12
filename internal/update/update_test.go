@@ -160,3 +160,34 @@ func TestUnsignedOrTamperedRefused(t *testing.T) {
 		}
 	}
 }
+
+func TestFolderInstalledAndReplaced(t *testing.T) {
+	arc := lhaStored(map[string][]byte{
+		"pkg/Libs/main.library": []byte("main"),
+		"pkg/Libs/mods/A":       []byte("a"),
+		"pkg/Libs/mods/B":       []byte("b"),
+		"pkg/Libs/mods/sub/C":   []byte("not installed"),
+		"pkg/Docs/readme":       []byte("not installed"),
+	}, "pkg/Libs/main.library", "pkg/Libs/mods/A", "pkg/Libs/mods/B", "pkg/Libs/mods/sub/C", "pkg/Docs/readme")
+	srv := server(t, map[string]*[]byte{"/p.lha": &arc}, map[string]int{})
+	src := &Source{Name: "pkg", URL: srv.URL + "/p.lha",
+		Files: map[string]string{"pkg/libs/main.library": "main.library"},
+		Dirs:  map[string]string{"PKG/Libs/Mods": "mods"}}
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "mods"), 0o755)
+	os.WriteFile(filepath.Join(dir, "mods", "Stale"), []byte("old"), 0o644)
+	if _, err := (&Updater{Dir: dir}).Update(context.Background(), src, true); err != nil {
+		t.Fatal(err)
+	}
+	ents, _ := os.ReadDir(filepath.Join(dir, "mods"))
+	var names []string
+	for _, e := range ents {
+		names = append(names, e.Name())
+	}
+	if strings.Join(names, ",") != "A,B" {
+		t.Fatalf("mods/ holds %v, want A,B", names)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "old", "mods", "Stale")); err != nil {
+		t.Fatal("previous folder not kept in old/")
+	}
+}

@@ -65,16 +65,11 @@ type Scanner struct {
 	IDString string
 }
 
-// Open loads xvs.library from libsDir. There can be only one Scanner per
-// process (the emulated CPU is global).
-func Open(libsDir string) (*Scanner, error) {
-	path := filepath.Join(libsDir, "xvs.library")
-	m := amiga.New(libsDir)
-	// xvs.library refuses to start unless these exist
-	m.AddFakeDevice("trackdisk.device")
-	m.AddFakeLibrary("intuition.library", 40)
-	m.AddFakeLibrary("utility.library", 40)
-	m.AddFakeLibrary("graphics.library", 40)
+// Open loads xvs.library from the machine's LIBS: folder. (xvs.library
+// refuses to start without trackdisk.device and intuition.library, which
+// amiga.New provides.)
+func Open(m *amiga.Machine) (*Scanner, error) {
+	path := filepath.Join(m.LibsDir, "xvs.library")
 	lib, err := m.LoadLibrary(path)
 	if err != nil {
 		return nil, err

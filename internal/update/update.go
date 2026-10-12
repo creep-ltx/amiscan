@@ -31,6 +31,10 @@ type Source struct {
 	URL  string // an LhA archive
 	// Files maps an archive member (path, any case) to its name in the libs folder.
 	Files map[string]string
+	// Dirs maps an archive folder (path, any case) to a folder in the libs
+	// folder; its files (not subfolders) are installed there, replacing
+	// the whole folder.
+	Dirs map[string]string
 	// Signed maps a libs file name to the archive member holding its PGP 2
 	// signature by Signer. A file listed here is never installed unsigned.
 	Signed map[string]string
@@ -50,6 +54,15 @@ var XVS = &Source{
 	Files:  map[string]string{"xvs/libs/xvs.library": "xvs.library"},
 	Signed: map[string]string{"xvs.library": "xvs/libs/xvs.library.sig"},
 	Signer: Georg,
+}
+
+// XFD is xfdmaster.library and its decrunchers from Aminet (no signature
+// is published; the code only ever runs inside the emulated Amiga).
+var XFD = &Source{
+	Name:  "xfdmaster.library",
+	URL:   "https://aminet.net/util/pack/xfdmaster.lha",
+	Files: map[string]string{"xfd_User/Libs/xfdmaster.library": "xfdmaster.library"},
+	Dirs:  map[string]string{"xfd_User/Libs/xfd": "xfd"},
 }
 
 // Result says what happened to one source.
@@ -145,6 +158,11 @@ func (u *Updater) Update(ctx context.Context, src *Source, force bool) ([]Result
 }
 
 func (u *Updater) present(src *Source) bool {
+	for _, name := range src.Dirs {
+		if st, err := os.Stat(filepath.Join(u.Dir, name)); err != nil || !st.IsDir() {
+			return false
+		}
+	}
 	for _, name := range src.Files {
 		if _, err := os.Stat(filepath.Join(u.Dir, name)); err != nil {
 			return false
@@ -231,7 +249,9 @@ func (u *Updater) one(ctx context.Context, src *Source, force bool) (Result, err
 	}
 	defer os.RemoveAll(tmp)
 	for name, data := range files {
-		if err := os.WriteFile(filepath.Join(tmp, name), data, 0o644); err != nil {
+		to := filepath.Join(tmp, filepath.FromSlash(name))
+		os.MkdirAll(filepath.Dir(to), 0o755)
+		if err := os.WriteFile(to, data, 0o644); err != nil {
 			return res, err
 		}
 	}
@@ -254,11 +274,20 @@ func (u *Updater) one(ctx context.Context, src *Source, force bool) (Result, err
 	}
 
 	// keep the previous files and the whole archive as published
-	for name := range files {
+	var top []string // files and folders directly in the libs folder
+	for name := range src.Files {
+		top = append(top, src.Files[name])
+	}
+	for _, dir := range src.Dirs {
+		top = append(top, dir)
+	}
+	for _, name := range top {
 		dst := filepath.Join(u.Dir, name)
 		if _, err := os.Stat(dst); err == nil {
-			os.MkdirAll(filepath.Join(u.Dir, "old"), 0o755)
-			os.Rename(dst, filepath.Join(u.Dir, "old", name))
+			old := filepath.Join(u.Dir, "old", name)
+			os.MkdirAll(filepath.Dir(old), 0o755)
+			os.RemoveAll(old)
+			os.Rename(dst, old)
 		}
 		if err := os.Rename(filepath.Join(tmp, name), dst); err != nil {
 			return res, err
@@ -302,6 +331,32 @@ func unpack(src *Source, archive []byte) (files map[string][]byte, signed bool, 
 		}
 		if files[name], err = member(m); err != nil {
 			return nil, false, err
+		}
+	}
+	for prefix, dir := range src.Dirs {
+		if strings.ContainsAny(dir, `/\`) || dir == "" || dir[0] == '.' {
+			return nil, false, fmt.Errorf("bad folder name %q", dir)
+		}
+		prefix = strings.ToLower(strings.Trim(prefix, "/")) + "/"
+		n := 0
+		for _, f := range a.Files {
+			rel := strings.TrimLeft(f.Name, "/")
+			if f.Dir || !strings.HasPrefix(strings.ToLower(rel), prefix) {
+				continue
+			}
+			name := rel[len(prefix):]
+			if name == "" || strings.ContainsAny(name, `/\`) || name == "." || name == ".." {
+				continue // only the files directly in the folder
+			}
+			data, err := a.ReadFile(f, 16<<20)
+			if err != nil {
+				return nil, false, fmt.Errorf("%s: %w", rel, err)
+			}
+			files[dir+"/"+name] = data
+			n++
+		}
+		if n == 0 {
+			return nil, false, fmt.Errorf("%s is not in the archive", prefix)
 		}
 	}
 	for name, sigMember := range src.Signed {

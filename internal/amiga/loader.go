@@ -174,6 +174,15 @@ func (m *Machine) LoadSeg(data []byte) (seglist uint32, hunks []uint32, err erro
 	return seglist, hunks, nil
 }
 
+// UnLoadSeg frees a segment list made by LoadSeg.
+func (m *Machine) UnLoadSeg(seg uint32) {
+	for n := 0; seg != 0 && n < 1000; n++ {
+		next := m.r32(seg << 2)
+		m.Free((seg << 2) - 4)
+		seg = next
+	}
+}
+
 // findRomTag looks for a Resident structure in the loaded hunks.
 func (m *Machine) findRomTag(hunks []uint32) uint32 {
 	for _, h := range hunks {

@@ -10,9 +10,13 @@ installed.
 ## Setting up
 
 1. Put `amiscan` anywhere on your path, e.g. `~/.local/bin/`.
-2. Run `amiscan -update`. It downloads **xvs.library**, the virus database,
-   from the Virus Help Team (<https://www.vht-dk.dk/amiga/xvs/xvs.htm>) into
-   `~/.local/share/amiscan/libs/`.
+2. Run `amiscan -update`. It downloads into `~/.local/share/amiscan/libs/`:
+   - **xvs.library**, the virus database, from the Virus Help Team
+     (<https://www.vht-dk.dk/amiga/xvs/xvs.htm>);
+   - **xfdmaster.library** and its 103 decrunchers from Aminet
+     (<https://aminet.net/util/pack/xfdmaster.lha>), so that programs packed
+     with PowerPacker, Imploder, StoneCracker, CrunchMania and the like are
+     unpacked and their insides checked too.
 
 Run `amiscan -update` now and then (AmiScan reminds you after 30 days). It
 only downloads when the Virus Help Team has published something new, and it
@@ -57,11 +61,14 @@ not be checked (named in the output).
 
 - Files bigger than 4 MB are not checked (they do not fit in the emulated
   Amiga's memory). They are named in the output.
-- Packed (crunched) programs are checked as they are; a virus inside a
-  PowerPacker or Imploder file is not seen yet.
+- Without xfdmaster.library, packed programs are checked only as they are.
+- A file packed with a password cannot be unpacked; the output says so.
 
 ## Thanks
 
-xvs.library is © Georg Wittmann, Alex van Niel and Jan Erik Olausen. It is
-freeware, not part of AmiScan, and you download it yourself. The 68000 is
+xvs.library is © Georg Wittmann, Alex van Niel and Jan Erik Olausen;
+xfdmaster.library © Georg Hörmann and Dirk Stöcker. Both are freeware, not
+part of AmiScan, and downloaded by you from where their authors publish them.
+All Amiga code runs inside AmiScan's emulated Amiga, which can only read its
+own libs folder. The 68000 is
 Musashi by Karl Stenerud. See [NOTICES.md](NOTICES.md).
