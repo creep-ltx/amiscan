@@ -382,7 +382,10 @@ func libraryVersion(name string) func(dir string) (string, error) {
 		defer cancel()
 		out, err := exec.CommandContext(ctx, exe, "-libs", dir, "-check-library", name).CombinedOutput()
 		if err != nil {
-			return "", fmt.Errorf("%s", strings.TrimSpace(string(out)))
+			if msg := strings.TrimSpace(string(out)); msg != "" {
+				return "", errors.New(msg)
+			}
+			return "", fmt.Errorf("trying it in %s: %w", exe, err)
 		}
 		v := idVersionRe.FindString(string(out))
 		if v == "" {

@@ -18,8 +18,8 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
       - name: vet and unit tests
@@ -28,12 +28,12 @@ jobs:
           go test ./...
       - name: build
         shell: bash
-        run: go build -o amiscan-test ./cmd/amiscan
+        run: go build -o amiscan-test$(go env GOEXE) ./cmd/amiscan
       - name: fetch the real parts and test against them
         shell: bash
         run: |
-          ./amiscan-test -update -libs "$RUNNER_TEMP/libs"
-          ./amiscan-test -version -libs "$RUNNER_TEMP/libs"
+          ./amiscan-test$(go env GOEXE) -update -libs "$RUNNER_TEMP/libs"
+          ./amiscan-test$(go env GOEXE) -version -libs "$RUNNER_TEMP/libs"
           AMISCAN_LIBS="$RUNNER_TEMP/libs" go test ./...
       - name: manual page
         if: runner.os == 'Linux'
@@ -53,8 +53,8 @@ jobs:
           - { os: macos-latest, name: macos-x86_64, goarch: amd64 } # cross-built for Intel Macs
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
       - name: build
