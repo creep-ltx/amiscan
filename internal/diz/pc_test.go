@@ -84,6 +84,10 @@ func TestPCMembersMatchGolden(t *testing.T) {
 		{"OX.ZIP", "zip", "OX.ZIP"}, {"PARKAT.ZIP", "zip", "PARKAT.ZIP"}, {"MRIMHPLJ.ZIP", "zip", "MRIMHPLJ.ZIP"},
 	}
 	for _, c := range cases {
+		if !present(pcFile(c.file)) {
+			t.Logf("%s is not published, skipped", c.file)
+			continue
+		}
 		format, ms := pcMembers(t, c.file)
 		want := g[c.golden]
 		if format != c.format || len(ms) != len(want) {
@@ -124,23 +128,35 @@ func TestExaminePC(t *testing.T) {
 	}
 
 	// A real BBS archive with FILE_ID.DIZ (and DESC.SDI).
-	res, _ := Examine(pcFile("TWWORM.ARJ"), 10)
-	if res.Format != "arj" || len(res.DIZ) == 0 || res.DIZ[0] != "Roaming WormHole. Put a roaming WormHole in" {
-		t.Errorf("TWWORM.ARJ: %q", res.DIZ)
+	if present(pcFile("TWWORM.ARJ")) {
+		res, _ := Examine(pcFile("TWWORM.ARJ"), 10)
+		if res.Format != "arj" || len(res.DIZ) == 0 || res.DIZ[0] != "Roaming WormHole. Put a roaming WormHole in" {
+			t.Errorf("TWWORM.ARJ: %q", res.DIZ)
+		}
+	} else {
+		t.Logf("TWWORM.ARJ is not published, skipped")
 	}
 
 	// No DIZ: fallbacks from the readme, or the names.
-	res, _ = Examine(pcFile("PAK251.EXE"), 10)
-	if res.Format != "sfx" || res.DIZ != nil || len(res.Candidates) < 2 || res.Candidates[0].Source != "from READ.ME" {
-		t.Errorf("PAK251.EXE: %+v", res)
+	if present(pcFile("PAK251.EXE")) {
+		res, _ := Examine(pcFile("PAK251.EXE"), 10)
+		if res.Format != "sfx" || res.DIZ != nil || len(res.Candidates) < 2 || res.Candidates[0].Source != "from READ.ME" {
+			t.Errorf("PAK251.EXE: %+v", res)
+		}
+	} else {
+		t.Logf("PAK251.EXE is not published, skipped")
 	}
-	res, _ = Examine(pcFile("README.TXT.gz"), 10)
+	res, _ := Examine(pcFile("README.TXT.gz"), 10)
 	if res.Format != "gzip" || len(res.Candidates) == 0 || res.Candidates[0].Source != "from README.TXT" {
 		t.Errorf("README.TXT.gz: %+v", res)
 	}
-	res, _ = Examine(pcFile("ARC2PAK1.PAK"), 10)
-	if res.Format != "arc" || len(res.Candidates) == 0 || res.Candidates[len(res.Candidates)-1].Source != "contents" {
-		t.Errorf("ARC2PAK1.PAK: %+v", res)
+	if present(pcFile("ARC2PAK1.PAK")) {
+		res, _ = Examine(pcFile("ARC2PAK1.PAK"), 10)
+		if res.Format != "arc" || len(res.Candidates) == 0 || res.Candidates[len(res.Candidates)-1].Source != "contents" {
+			t.Errorf("ARC2PAK1.PAK: %+v", res)
+		}
+	} else {
+		t.Logf("ARC2PAK1.PAK is not published, skipped")
 	}
 
 	// A RAR whose names are encrypted, and the second volume of a set: a
@@ -186,6 +202,10 @@ func TestExaminePCCorrupt(t *testing.T) {
 		"zoo-lzd.zoo", "zoo-lh5.zoo", "rar4.rar", "rar5-solid.rar", "COCO2-14.RAR", "files.tar.gz",
 		"files.tar.xz", "sfx-arj-m1.exe", "sfx-crunch.exe", "PAK251.EXE"}
 	for _, name := range names {
+		if !present(pcFile(name)) {
+			t.Logf("%s is not published, skipped", name)
+			continue
+		}
 		orig, err := os.ReadFile(pcFile(name))
 		if err != nil {
 			t.Fatal(err)

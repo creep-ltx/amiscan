@@ -8,10 +8,12 @@ import (
 	"testing"
 )
 
+func tdPath(name string) string { return filepath.Join("..", "testdata", name) }
+
 // The archives in ../testdata are real LZX uploads from BBS hard disks.
 func open(t *testing.T, name string) *Reader {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join("..", "testdata", name))
+	b, err := os.ReadFile(tdPath(name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,6 +26,10 @@ func open(t *testing.T, name string) *Reader {
 
 func TestAllMembersCRC(t *testing.T) {
 	for _, name := range []string{"dtr-am21.lzx", "msgconvert02.lzx", "config03.lzx"} {
+		if !present(tdPath(name)) {
+			t.Logf("%s is not published, skipped", name)
+			continue
+		}
 		r := open(t, name)
 		for _, f := range r.Files {
 			if _, err := r.ReadFile(f, 0); err != nil {
@@ -35,6 +41,7 @@ func TestAllMembersCRC(t *testing.T) {
 
 // The FILE_ID.DIZ must come out byte for byte as unlzx extracts it.
 func TestMatchesUnlzx(t *testing.T) {
+	needReal(t, tdPath("dtr-am21.lzx"), tdPath("golden/dtr-am21.lzx.diz"))
 	want, err := os.ReadFile(filepath.Join("..", "testdata", "golden", "dtr-am21.lzx.diz"))
 	if err != nil {
 		t.Fatal(err)
@@ -56,6 +63,7 @@ func TestMatchesUnlzx(t *testing.T) {
 }
 
 func TestLimit(t *testing.T) {
+	needReal(t, tdPath("msgconvert02.lzx"))
 	r := open(t, "msgconvert02.lzx")
 	f := r.Files[len(r.Files)-1]
 	full, err := r.ReadFile(f, 0)
@@ -71,7 +79,11 @@ func TestLimit(t *testing.T) {
 // Damaged archives must never panic or hang.
 func TestCorrupt(t *testing.T) {
 	for _, name := range []string{"dtr-am21.lzx", "msgconvert02.lzx"} {
-		orig, _ := os.ReadFile(filepath.Join("..", "testdata", name))
+		if !present(tdPath(name)) {
+			t.Logf("%s is not published, skipped", name)
+			continue
+		}
+		orig, _ := os.ReadFile(tdPath(name))
 		for i := 0; i < 300; i++ {
 			b := append([]byte{}, orig...)
 			seed := uint32(i*2654435761 + 7)

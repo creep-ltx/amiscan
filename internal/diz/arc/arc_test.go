@@ -68,7 +68,13 @@ func TestMembers(t *testing.T) {
 		{"ARC2PAK1.PAK", 0, nil},
 		{"PAK251.EXE", 6867, nil}, // PAK's own self-extractor
 	}
+	skipped := 0
 	for _, c := range cases {
+		if !present(pc(c.name)) {
+			t.Logf("%s is not published, skipped", c.name)
+			skipped++
+			continue
+		}
 		r := openAt(t, c.name, c.off)
 		for _, f := range r.Files {
 			out, err := r.ReadFile(f, 0) // checks the CRC
@@ -82,6 +88,9 @@ func TestMembers(t *testing.T) {
 			methods[f.Method]++
 		}
 	}
+	if skipped > 0 {
+		t.Skipf("%d real archives are not published, so not every method was tested; see testdata/README.md", skipped)
+	}
 	for _, m := range []int{2, 3, 4, 6, 8, 9, 10, 11} {
 		if methods[m] == 0 {
 			t.Errorf("no method %d member tested", m)
@@ -90,6 +99,7 @@ func TestMembers(t *testing.T) {
 }
 
 func TestLimit(t *testing.T) {
+	needReal(t, pc("PAK251.EXE"))
 	r := openAt(t, "PAK251.EXE", 6867)
 	for _, f := range r.Files {
 		full, err := r.ReadFile(f, 0)
@@ -104,6 +114,7 @@ func TestLimit(t *testing.T) {
 }
 
 func TestVerify(t *testing.T) {
+	needReal(t, pc("PAK251.EXE"))
 	b, _ := os.ReadFile(pc("PAK251.EXE"))
 	if !Verify(bytes.NewReader(b), 6867, int64(len(b))) {
 		t.Error("PAK251.EXE: archive at 6867 not verified")
@@ -116,6 +127,10 @@ func TestVerify(t *testing.T) {
 // Damaged archives must never panic or hang.
 func TestCorrupt(t *testing.T) {
 	for _, name := range []string{"crunch.arc", "squash.arc", "ARC2PAK1.PAK", "SIL2.ARC", "2001.ARC"} {
+		if !present(pc(name)) {
+			t.Logf("%s is not published, skipped", name)
+			continue
+		}
 		orig, _ := os.ReadFile(pc(name))
 		for i := 0; i < 300; i++ {
 			b := append([]byte{}, orig...)

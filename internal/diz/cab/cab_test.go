@@ -55,6 +55,10 @@ func open(t *testing.T, name string) *Reader {
 func TestMembers(t *testing.T) {
 	g := golden(t)
 	for _, name := range []string{"mszip.cab", "FADER.CAB"} {
+		if !present(pc(name)) {
+			t.Logf("%s is not published, skipped", name)
+			continue
+		}
 		r := open(t, name)
 		if len(r.Files) != len(g[name]) {
 			t.Errorf("%s: %d members", name, len(r.Files))
@@ -75,6 +79,10 @@ func TestMembers(t *testing.T) {
 // Damaged cabinets must never panic or hang.
 func TestCorrupt(t *testing.T) {
 	for _, name := range []string{"mszip.cab", "FADER.CAB"} {
+		if !present(pc(name)) {
+			t.Logf("%s is not published, skipped", name)
+			continue
+		}
 		orig, _ := os.ReadFile(pc(name))
 		for i := 0; i < 300; i++ {
 			b := append([]byte{}, orig...)

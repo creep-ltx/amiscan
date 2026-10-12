@@ -59,6 +59,10 @@ func TestMembers(t *testing.T) {
 		if name == "PMLDOC19.ZOO" {
 			want = g[name]
 		}
+		if !present(pc(name)) {
+			t.Logf("%s is not published, skipped", name)
+			continue
+		}
 		r := open(t, name)
 		for _, f := range r.Files {
 			out, err := r.ReadFile(f, 0)
@@ -77,6 +81,7 @@ func TestMembers(t *testing.T) {
 			t.Errorf("no method %d member tested", m)
 		}
 	}
+	needReal(t, pc("PMLDOC19.ZOO"))
 	if r := open(t, "PMLDOC19.ZOO"); r.Files[0].Name != "doc/header.r" {
 		t.Errorf("folder name %q", r.Files[0].Name)
 	}
@@ -98,6 +103,10 @@ func TestLimit(t *testing.T) {
 // Damaged archives must never panic or hang.
 func TestCorrupt(t *testing.T) {
 	for _, name := range []string{"zoo-lzd.zoo", "zoo-lh5.zoo", "PMLDOC19.ZOO"} {
+		if !present(pc(name)) {
+			t.Logf("%s is not published, skipped", name)
+			continue
+		}
 		orig, _ := os.ReadFile(pc(name))
 		for i := 0; i < 300; i++ {
 			b := append([]byte{}, orig...)

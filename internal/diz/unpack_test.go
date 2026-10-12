@@ -11,8 +11,14 @@ import (
 // TestUnpack: every file of real LHA and LZX archives comes out whole, the same bytes as
 // lha (Lhasa) gives, when it is installed; a limit stops a big archive.
 func TestUnpack(t *testing.T) {
+	tested := 0
 	for _, name := range []string{"5D-BCHCK.LHA", "quicksketch.lha", "config03.lzx"} {
 		src := filepath.Join("testdata", name)
+		if !present(src) {
+			t.Logf("%s is not published, skipped", name)
+			continue
+		}
+		tested++
 		dest := t.TempDir()
 		files, err := Unpack(src, dest, 64<<20)
 		if err != nil || len(files) == 0 {
@@ -46,5 +52,8 @@ func TestUnpack(t *testing.T) {
 		if _, err := Unpack(src, t.TempDir(), 10); err == nil {
 			t.Errorf("%s: unpacked past a 10-byte limit", name)
 		}
+	}
+	if tested == 0 {
+		t.Skip("none of the real archives is published; see testdata/README.md")
 	}
 }

@@ -109,4 +109,6 @@ the 68000 inside AmiScan. See [NOTICES.md](NOTICES.md).
 
 ## Licence
 
-LICENCE_PLACEHOLDER
+AmiScan is free software under the [MIT licence](LICENSE), © 2026 Tobias Karlsson.
+The parts it downloads keep their own licences: they are freeware for
+non-commercial use, and each user fetches them from their authors.

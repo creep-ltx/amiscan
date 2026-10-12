@@ -47,6 +47,10 @@ func TestContents(t *testing.T) {
 		}},
 	}
 	for _, c := range cases {
+		if !present(c.path) {
+			t.Logf("%s is not published, skipped", c.path)
+			continue
+		}
 		es, format, err := Contents(c.path)
 		if err != nil || format != c.format || len(es) != c.count {
 			t.Errorf("%s: %s, %d entries, %v; want %s, %d", c.path, format, len(es), err, c.format, c.count)

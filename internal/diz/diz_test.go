@@ -23,7 +23,13 @@ func TestExamineMatchesTools(t *testing.T) {
 		"DPH-CONQ.LHA": "lha", // level 2 headers, then level 0 ones a BBS added
 		"dtr-am21.lzx": "lzx",
 	}
+	tested := 0
 	for name, format := range cases {
+		if !present(td(name)) || !present(td("golden/"+name+".diz")) {
+			t.Logf("%s is not published, skipped", name)
+			continue
+		}
+		tested++
 		res, err := Examine(td(name), 10)
 		if err != nil {
 			t.Fatal(err)
@@ -42,9 +48,13 @@ func TestExamineMatchesTools(t *testing.T) {
 			t.Errorf("%s: candidates with a DIZ", name)
 		}
 	}
+	if tested == 0 {
+		t.Skip("none of the real archives is published; see testdata/README.md")
+	}
 }
 
 func TestExamineDIZText(t *testing.T) {
+	needReal(t, td("5D-BCHCK.LHA"), td("dtr-am21.lzx"))
 	res, _ := Examine(td("5D-BCHCK.LHA"), 10)
 	if got := res.DIZ[len(res.DIZ)-1]; got != "     Baud rate detecter for ami/x" {
 		t.Errorf("last line %q", got)
@@ -56,6 +66,7 @@ func TestExamineDIZText(t *testing.T) {
 }
 
 func TestExamineFallbacks(t *testing.T) {
+	needReal(t, td("quicksketch.lha"), td("msgconvert02.lzx"), td("config03.lzx"), td("ls-level1.lha"))
 	// LhA with an Aminet readme inside.
 	res, _ := Examine(td("quicksketch.lha"), 10)
 	want := []Candidate{
@@ -107,14 +118,22 @@ func TestExamine7z(t *testing.T) {
 }
 
 func TestExamineDMSAndOthers(t *testing.T) {
-	res, err := Examine(td("MTS-LS33.DMS"), 10)
-	if err != nil || res.Format != "dms" || res.DIZ == nil || len(res.Candidates) != 0 {
-		t.Errorf("dms: %+v %v", res, err)
+	if present(td("MTS-LS33.DMS")) {
+		res, err := Examine(td("MTS-LS33.DMS"), 10)
+		if err != nil || res.Format != "dms" || res.DIZ == nil || len(res.Candidates) != 0 {
+			t.Errorf("dms: %+v %v", res, err)
+		}
+	} else {
+		t.Logf("MTS-LS33.DMS is not published, skipped")
 	}
 	// A golden .diz file is plain text, not an archive.
-	res, err = Examine(td("golden/AFL-NM02.LHA.diz"), 10)
-	if err != nil || res.Format != "" || res.DIZ != nil {
-		t.Errorf("text file: %+v %v", res, err)
+	if present(td("golden/AFL-NM02.LHA.diz")) {
+		res, err := Examine(td("golden/AFL-NM02.LHA.diz"), 10)
+		if err != nil || res.Format != "" || res.DIZ != nil {
+			t.Errorf("text file: %+v %v", res, err)
+		}
+	} else {
+		t.Logf("golden/AFL-NM02.LHA.diz is not published, skipped")
 	}
 	if _, err := Examine(td("no-such-file.lha"), 10); err == nil {
 		t.Error("missing file: no error")
@@ -211,6 +230,10 @@ func TestExamineZip(t *testing.T) {
 func TestExamineCorruptNeverPanics(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"5D-BCHCK.LHA", "dtr-am21.lzx", "quicksketch.lha", "tool.7z"} {
+		if !present(td(name)) {
+			t.Logf("%s is not published, skipped", name)
+			continue
+		}
 		orig, _ := os.ReadFile(td(name))
 		for i := 0; i < 60; i++ {
 			b := append([]byte{}, orig...)

@@ -84,27 +84,35 @@ func TestExamineADFAndHDF(t *testing.T) {
 
 func TestExamineDMS(t *testing.T) {
 	// The FILE_ID.DIZ a BBS attached as track 80.
-	res, err := Examine(td("MTS-LS33.DMS"), 10)
-	if err != nil || res.Format != "dms" || len(res.DIZ) != 10 || res.DIZ[8] != "      LogonStartup v0.33 by WD/MtS" {
-		t.Errorf("MTS-LS33: %q %v", res.DIZ, err)
+	if present(td("MTS-LS33.DMS")) {
+		res, err := Examine(td("MTS-LS33.DMS"), 10)
+		if err != nil || res.Format != "dms" || len(res.DIZ) != 10 || res.DIZ[8] != "      LogonStartup v0.33 by WD/MtS" {
+			t.Errorf("MTS-LS33: %q %v", res.DIZ, err)
+		}
+	} else {
+		t.Logf("MTS-LS33.DMS is not published, skipped")
 	}
 	// No DIZ: the readme on the disk, the banner, the disk itself.
-	res, err = Examine(diskTD("AMOSPRO4.DMS"), 10)
-	if err != nil || res.DIZ != nil {
-		t.Fatalf("AMOSPRO4: %+v %v", res, err)
-	}
-	if got := sources(res.Candidates); strings.Join(got, ",") != "from AMOSPro_Help.Txt,DMS banner,disk,contents" {
-		t.Errorf("AMOSPRO4 candidates %q", got)
-	}
-	disk := res.Candidates[2].Lines
-	if disk[0] != "Disk: AMOSPro_Accessories" || !strings.HasPrefix(disk[1], "Contains: AMAL_Editor.AMOS, AMOSPro_Help,") {
-		t.Errorf("disk candidate %q", disk)
-	}
-	if !strings.Contains(strings.Join(res.Candidates[1].Lines, "\n"), "IMPACT UK") {
-		t.Errorf("banner %q", res.Candidates[1].Lines)
+	if present(diskTD("AMOSPRO4.DMS")) {
+		res, err := Examine(diskTD("AMOSPRO4.DMS"), 10)
+		if err != nil || res.DIZ != nil {
+			t.Fatalf("AMOSPRO4: %+v %v", res, err)
+		}
+		if got := sources(res.Candidates); strings.Join(got, ",") != "from AMOSPro_Help.Txt,DMS banner,disk,contents" {
+			t.Errorf("AMOSPRO4 candidates %q", got)
+		}
+		disk := res.Candidates[2].Lines
+		if disk[0] != "Disk: AMOSPro_Accessories" || !strings.HasPrefix(disk[1], "Contains: AMAL_Editor.AMOS, AMOSPro_Help,") {
+			t.Errorf("disk candidate %q", disk)
+		}
+		if !strings.Contains(strings.Join(res.Candidates[1].Lines, "\n"), "IMPACT UK") {
+			t.Errorf("banner %q", res.Candidates[1].Lines)
+		}
+	} else {
+		t.Logf("disk/AMOSPRO4.DMS is not published, skipped")
 	}
 	// The all-modes test file is no AmigaDOS disk; the generator wrote random tracks.
-	res, _ = Examine(diskTD("modes.dms"), 10)
+	res, _ := Examine(diskTD("modes.dms"), 10)
 	if res.Format != "dms" || len(res.Candidates) == 0 || res.Candidates[0].Source != "disk" {
 		t.Errorf("modes.dms: %+v", res)
 	}

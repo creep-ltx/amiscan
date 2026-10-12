@@ -59,6 +59,10 @@ func TestMatchesGolden(t *testing.T) {
 		if name == "TWWORM.ARJ" {
 			want = g[name]
 		}
+		if !present(pc(name)) {
+			t.Logf("%s is not published, skipped", name)
+			continue
+		}
 		r := open(t, name)
 		if len(r.Files) != len(want) {
 			t.Errorf("%s: %d members, want %d", name, len(r.Files), len(want))
@@ -145,6 +149,10 @@ func TestVolumes(t *testing.T) {
 // Damaged archives must never panic or hang.
 func TestCorrupt(t *testing.T) {
 	for _, name := range []string{"arj-m1.arj", "arj-m4.arj", "TWWORM.ARJ"} {
+		if !present(pc(name)) {
+			t.Logf("%s is not published, skipped", name)
+			continue
+		}
 		orig, _ := os.ReadFile(pc(name))
 		for i := 0; i < 300; i++ {
 			b := append([]byte{}, orig...)

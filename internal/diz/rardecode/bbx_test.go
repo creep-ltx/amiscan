@@ -46,6 +46,10 @@ func TestBBXArchives(t *testing.T) {
 		if name == "COCO2-14.RAR" {
 			want = g[name]
 		}
+		if !present(pc(name)) {
+			t.Logf("%s is not published, skipped", name)
+			continue
+		}
 		f, err := os.Open(pc(name))
 		if err != nil {
 			t.Fatal(err)

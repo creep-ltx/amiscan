@@ -1,6 +1,7 @@
 # Notices
 
-AmiScan contains these works by others.
+AmiScan is © 2026 Tobias Karlsson, under the MIT licence (LICENSE). It
+contains these works by others.
 
 - **Musashi** 68000 emulator, © 1998-2001 Karl Stenerud, MIT-style licence:
   `internal/m68k/musashi/LICENSE.txt`. Includes SoftFloat by John R. Hauser

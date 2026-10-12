@@ -20,6 +20,10 @@ func TestScan(t *testing.T) {
 		"sfx-cab.exe":     {"cab", 512},
 	}
 	for name, want := range cases {
+		if !present(filepath.Join("..", "testdata", "pc", name)) {
+			t.Logf("%s is not published, skipped", name)
+			continue
+		}
 		f, err := os.Open(filepath.Join("..", "testdata", "pc", name))
 		if err != nil {
 			t.Fatal(err)

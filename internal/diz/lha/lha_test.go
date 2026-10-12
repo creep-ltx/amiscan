@@ -8,11 +8,13 @@ import (
 	"testing"
 )
 
+func tdPath(name string) string { return filepath.Join("..", "testdata", name) }
+
 // The archives in ../testdata are real BBS uploads: -lh1- (LHarc) and -lh5-
 // members, header levels 0, 1 and 2, and BBS adverts added afterwards.
 func open(t *testing.T, name string) *Reader {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join("..", "testdata", name))
+	b, err := os.ReadFile(tdPath(name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +28,13 @@ func open(t *testing.T, name string) *Reader {
 func TestAllMembersCRC(t *testing.T) {
 	methods := map[string]int{}
 	levels := map[int]int{}
+	skipped := 0
 	for _, name := range []string{"5D-AVL01.LZH", "5D-BCHCK.LHA", "AFL-NM02.LHA", "DPH-CONQ.LHA", "ls-level1.lha", "quicksketch.lha"} {
+		if !present(tdPath(name)) {
+			t.Logf("%s is not published, skipped", name)
+			skipped++
+			continue
+		}
 		r := open(t, name)
 		for _, f := range r.Files {
 			if _, err := r.ReadFile(f, 0); err != nil {
@@ -35,6 +43,9 @@ func TestAllMembersCRC(t *testing.T) {
 			methods[f.Method]++
 			levels[f.Level]++
 		}
+	}
+	if skipped > 0 {
+		t.Skipf("%d real archives are not published, so not every method was tested; see testdata/README.md", skipped)
 	}
 	for _, m := range []string{"-lh0-", "-lh1-", "-lh5-", "-lhd-"} {
 		if methods[m] == 0 {
@@ -50,7 +61,13 @@ func TestAllMembersCRC(t *testing.T) {
 
 // The FILE_ID.DIZ must come out byte for byte as lha (Lhasa) extracts it.
 func TestMatchesLha(t *testing.T) {
+	tested := 0
 	for _, name := range []string{"5D-AVL01.LZH", "5D-BCHCK.LHA", "AFL-NM02.LHA", "DPH-CONQ.LHA"} {
+		if !present(tdPath(name)) || !present(tdPath("golden/"+name+".diz")) {
+			t.Logf("%s is not published, skipped", name)
+			continue
+		}
+		tested++
 		want, err := os.ReadFile(filepath.Join("..", "testdata", "golden", name+".diz"))
 		if err != nil {
 			t.Fatal(err)
@@ -73,9 +90,13 @@ func TestMatchesLha(t *testing.T) {
 			t.Errorf("%s: no FILE_ID.DIZ listed", name)
 		}
 	}
+	if tested == 0 {
+		t.Skip("none of the real archives is published; see testdata/README.md")
+	}
 }
 
 func TestNames(t *testing.T) {
+	needReal(t, tdPath("5D-BCHCK.LHA"), tdPath("ls-level1.lha"))
 	r := open(t, "5D-BCHCK.LHA")
 	want := []string{"5D-Baudcheck/5D-BaudCheck", "5D-Baudcheck/5D-BaudCheck.guide",
 		"5D-Baudcheck/5D-BaudCheck.info", "Commands/SysCmd/FRONTEND.info", "file_id.diz"}
@@ -95,6 +116,7 @@ func TestNames(t *testing.T) {
 }
 
 func TestLimit(t *testing.T) {
+	needReal(t, tdPath("5D-BCHCK.LHA"))
 	r := open(t, "5D-BCHCK.LHA")
 	full, err := r.ReadFile(r.Files[0], 0)
 	if err != nil {
@@ -109,7 +131,11 @@ func TestLimit(t *testing.T) {
 // Damaged archives must never panic or hang.
 func TestCorrupt(t *testing.T) {
 	for _, name := range []string{"5D-BCHCK.LHA", "DPH-CONQ.LHA", "ls-level1.lha"} {
-		orig, _ := os.ReadFile(filepath.Join("..", "testdata", name))
+		if !present(tdPath(name)) {
+			t.Logf("%s is not published, skipped", name)
+			continue
+		}
+		orig, _ := os.ReadFile(tdPath(name))
 		for i := 0; i < 300; i++ {
 			b := append([]byte{}, orig...)
 			seed := uint32(i*2654435761 + 1)

@@ -41,7 +41,13 @@ func TestPKZIP1(t *testing.T) {
 	Register()
 	g := golden(t)
 	seen := map[string]bool{}
+	skipped := 0
 	for _, name := range []string{"ATTSWIT.ZIP", "NAMEPATH.ZIP", "OX.ZIP", "PARKAT.ZIP", "MRIMHPLJ.ZIP"} {
+		if !present(pc(name)) {
+			t.Logf("%s is not published, skipped", name)
+			skipped++
+			continue
+		}
 		z, err := zip.OpenReader(pc(name))
 		if err != nil {
 			t.Fatal(err)
@@ -67,6 +73,9 @@ func TestPKZIP1(t *testing.T) {
 		}
 		z.Close()
 	}
+	if skipped > 0 {
+		t.Skipf("%d real archives are not published, so not every variant was tested; see testdata/README.md", skipped)
+	}
 	// PKZIP 1.x writes only these two implode variants.
 	for _, v := range []string{"shrink", "implode 4K 2 trees", "implode 8K 3 trees"} {
 		if !seen[v] {
@@ -79,6 +88,7 @@ func TestPKZIP1(t *testing.T) {
 // this real Atari archive (factor 4) is checked by its CRC, which
 // archive/zip verifies at the end of the data.
 func TestReduce(t *testing.T) {
+	needReal(t, pc("FIRETRKS.ZIP"))
 	Register()
 	z, err := zip.OpenReader(pc("FIRETRKS.ZIP"))
 	if err != nil {
@@ -123,6 +133,10 @@ func TestRandomInput(t *testing.T) {
 func TestCorrupt(t *testing.T) {
 	Register()
 	for _, name := range []string{"ATTSWIT.ZIP", "OX.ZIP", "MRIMHPLJ.ZIP"} {
+		if !present(pc(name)) {
+			t.Logf("%s is not published, skipped", name)
+			continue
+		}
 		orig, _ := os.ReadFile(pc(name))
 		for i := 0; i < 300; i++ {
 			b := append([]byte{}, orig...)

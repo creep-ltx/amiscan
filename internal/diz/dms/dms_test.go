@@ -12,9 +12,11 @@ import (
 	"time"
 )
 
+func tdPath(name string) string { return filepath.Join("..", "testdata", name) }
+
 func td(t testing.TB, name string) []byte {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join("..", "testdata", name))
+	b, err := os.ReadFile(tdPath(name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,6 +39,10 @@ func TestSameAsXDMS(t *testing.T) {
 		{"disk/AMOSPRO4.DMS", "9a84c5feb347f1d7024ea752cdf44b1637285698c57e5894de140fb4e6de508d", false, true, "", 80, 901120},
 	}
 	for _, c := range cases {
+		if !present(tdPath(c.file)) {
+			t.Logf("%s is not published, skipped", c.file)
+			continue
+		}
 		a, err := Read(td(t, c.file))
 		if err != nil {
 			t.Fatalf("%s: %v", c.file, err)
@@ -65,6 +71,7 @@ func TestSameAsXDMS(t *testing.T) {
 			t.Errorf("%s: image %d", c.file, len(a.Image()))
 		}
 	}
+	needReal(t, tdPath("MTS-LS33.DMS"))
 	a, _ := Read(td(t, "MTS-LS33.DMS"))
 	if !strings.Contains(string(a.DIZ), "LogonStartup v0.33") {
 		t.Errorf("DIZ %q", a.DIZ)
@@ -101,6 +108,7 @@ func TestNotDMS(t *testing.T) {
 	if _, err := Read([]byte("DMS!short")); err != ErrNotDMS {
 		t.Error(err)
 	}
+	needReal(t, tdPath("MTS-LS33.DMS"))
 	b := td(t, "MTS-LS33.DMS")
 	b[20]++
 	if _, err := Read(b); err != ErrHeaderCRC {
@@ -119,6 +127,10 @@ func TestNotDMS(t *testing.T) {
 func TestRandomDamage(t *testing.T) {
 	rng := rand.New(rand.NewSource(7))
 	for _, name := range []string{"disk/modes.dms", "MTS-LS33.DMS"} {
+		if !present(tdPath(name)) {
+			t.Logf("%s is not published, skipped", name)
+			continue
+		}
 		orig := td(t, name)
 		for round := 0; round < 300; round++ {
 			b := append([]byte(nil), orig...)

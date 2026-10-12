@@ -3,3 +3,33 @@
 /dist/
 # xvs.library may only be passed on as its whole, unchanged archive: never commit it
 *.library
+
+# real-world test archives: not published (see internal/diz/testdata/README.md)
+/internal/diz/testdata/5D-AVL01.LZH
+/internal/diz/testdata/5D-BCHCK.LHA
+/internal/diz/testdata/AFL-NM02.LHA
+/internal/diz/testdata/config03.lzx
+/internal/diz/testdata/DPH-CONQ.LHA
+/internal/diz/testdata/dtr-am21.lzx
+/internal/diz/testdata/ls-level1.lha
+/internal/diz/testdata/msgconvert02.lzx
+/internal/diz/testdata/MTS-LS33.DMS
+/internal/diz/testdata/quicksketch.lha
+/internal/diz/testdata/golden
+/internal/diz/testdata/disk/AMOSPRO4.DMS
+/internal/diz/testdata/pc/2001.ARC
+/internal/diz/testdata/pc/ARC2PAK1.PAK
+/internal/diz/testdata/pc/ATTSWIT.ZIP
+/internal/diz/testdata/pc/COCO2-14.RAR
+/internal/diz/testdata/pc/FADER.CAB
+/internal/diz/testdata/pc/FIRETRKS.ZIP
+/internal/diz/testdata/pc/LOOZ101.EXE
+/internal/diz/testdata/pc/MRIMHPLJ.ZIP
+/internal/diz/testdata/pc/NAMEPATH.ZIP
+/internal/diz/testdata/pc/OX.ZIP
+/internal/diz/testdata/pc/PAK251.EXE
+/internal/diz/testdata/pc/PARKAT.ZIP
+/internal/diz/testdata/pc/PMLDOC19.ZOO
+/internal/diz/testdata/pc/QG2IMPRT.EXE
+/internal/diz/testdata/pc/SIL2.ARC
+/internal/diz/testdata/pc/TWWORM.ARJ
