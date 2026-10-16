@@ -10,7 +10,7 @@ unchanged, inside a 68020 processor and a small AmigaOS that are built into the
 program. One file, nothing else to install.
 
 ```
-$ amiscan ~/Amiga/BBS
+$ amiscan ~/bbs/uploads
 AmiScan 0.1b1 with xvs 33.49 (11.04.2025)
 
 Viruses (15):
